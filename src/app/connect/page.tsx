@@ -87,7 +87,23 @@ export default function ConnectPage() {
   const [error, setError] = useState<string | null>(null);
   const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
 
+// 🔒 1. Show loading while auth system initializes
+if (authLoading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-amber-500" />
+        <p className="text-stone-600">Loading your space...</p>
+      </div>
+    </div>
+  );
+}
 
+// 🔒 2. Redirect to login if not authenticated
+if (!user) {
+  router.push('/auth');
+  return null;
+}
  
 
   useEffect(() => {
