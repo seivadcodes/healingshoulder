@@ -28,9 +28,10 @@ import {
   Heart,
   Settings,
   Clock,
-  X
+  X,
+  CheckCircle
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase'; // ✅
+import { createClient } from '@/lib/supabase';
 
 type GriefType =
   | 'parent'
@@ -72,7 +73,6 @@ interface Session {
 }
 
 export default function ConnectPage() {
-  // ✅ ALL HOOKS DECLARED FIRST — NO CONDITIONS ABOVE
   const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -87,8 +87,8 @@ export default function ConnectPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
+  const [matchedRequests, setMatchedRequests] = useState<Record<string, boolean>>({});
 
-  // 🔁 Fetch profile
   useEffect(() => {
     if (!user) return;
 
@@ -116,7 +116,6 @@ export default function ConnectPage() {
     fetchProfile();
   }, [user]);
 
-  // 🔁 Fetch online count
   useEffect(() => {
     const fetchOnlineCount = async () => {
       try {
@@ -138,123 +137,140 @@ export default function ConnectPage() {
     return () => clearInterval(interval);
   }, []);
 
- // 🔁 Fetch & subscribe to incoming requests — SHOW ALL (no grief type filtering)
-useEffect(() => {
-  if (!user) {
-    setIncomingRequests([]);
-    return;
-  }
-
-  const fetchRequests = async () => {
-    try {
-      setLoading(true);
-
-      console.debug('[ConnectPage] Fetching ALL support requests (no grief type filter)');
-      console.debug('[ConnectPage] Current user ID:', user.id);
-
-      const { data, error } = await supabase
-        .from('support_requests')
-        .select(`
-          *,
-          profiles:user_id ( full_name )
-        `)
-        .eq('status', 'pending')
-        .neq('user_id', user.id) // Don't show your own requests
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('[Supabase Error] Failed to fetch support_requests:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
-        });
-        throw error;
-      }
-
-      console.debug('[ConnectPage] Fetched support requests:', data);
-
-      const formattedRequests = (data || []).map(req => ({
-        ...req,
-        requester_name: req.profiles?.full_name || 'Someone',
-      }));
-
-      setIncomingRequests(formattedRequests);
-    } catch (err) {
-      console.error('[ConnectPage] Error in fetchRequests catch block:', err);
-
-      let errorMessage = 'Failed to load support requests. Please try again.';
-
-      if (err && typeof err === 'object') {
-        const maybeError = err as Partial<PostgrestError>;
-        if (maybeError.code) {
-          const code = maybeError.code;
-          const message = maybeError.message || 'Unknown database error';
-          const details = maybeError.details ? ` Details: ${maybeError.details}` : '';
-          const hint = maybeError.hint ? ` Hint: ${maybeError.hint}` : '';
-          errorMessage = `[${code}] ${message}${details}${hint}`;
-          console.error('[ConnectPage] Supabase PostgREST Error:', { code, message, details, hint });
-        } else if ('message' in err && typeof err.message === 'string') {
-          errorMessage = err.message;
-        } else {
-          errorMessage = 'We’re having trouble connecting right now. Please refresh or check your network.';
-        }
-      } else {
-        errorMessage = 'Unexpected error: ' + String(err);
-      }
-
-      setError(errorMessage);
+  useEffect(() => {
+    if (!user) {
       setIncomingRequests([]);
-    } finally {
-      setLoading(false);
+      return;
     }
-  };
 
-  fetchRequests();
+    const fetchRequests = async () => {
+      try {
+        setLoading(true);
 
-  // 🔁 Real-time subscription — listen to all new pending requests
-  const channel = supabase
-    .channel('support-requests')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_requests',
-        filter: 'status=eq.pending'
-      },
-      (payload) => {
-        const newRequest = payload.new as SupportRequest;
-        // ✅ Show to everyone except the requester
-        if (newRequest.user_id !== user.id) {
-          setIncomingRequests(prev => {
-            if (prev.some(req => req.id === newRequest.id)) return prev;
-            return [{ ...newRequest, requester_name: 'Someone' }, ...prev];
+        const { data, error } = await supabase
+          .from('support_requests')
+          .select(`
+            *,
+            profiles:user_id ( full_name )
+          `)
+          .eq('status', 'pending')
+          .neq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('[Supabase Error] Failed to fetch support_requests:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
           });
+          throw error;
         }
-      }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'support_requests',
-        filter: 'status=in.(matched,completed,cancelled)'
-      },
-      (payload) => {
-        const updatedRequest = payload.new as SupportRequest;
-        setIncomingRequests(prev => prev.filter(req => req.id !== updatedRequest.id));
-      }
-    )
-    .subscribe();
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [user]); // ✅ Only depend on `user` — not `profile` anymore
+        const formattedRequests = (data || []).map(req => ({
+          ...req,
+          requester_name: req.profiles?.full_name || 'Someone',
+        }));
 
-  // ✅ NOW SAFE TO USE EARLY RETURNS
+        setIncomingRequests(formattedRequests);
+      } catch (err) {
+        console.error('[ConnectPage] Error in fetchRequests catch block:', err);
+
+        let errorMessage = 'Failed to load support requests. Please try again.';
+
+        if (err && typeof err === 'object') {
+          const maybeError = err as Partial<PostgrestError>;
+          if (maybeError.code) {
+            const code = maybeError.code;
+            const message = maybeError.message || 'Unknown database error';
+            const details = maybeError.details ? ` Details: ${maybeError.details}` : '';
+            const hint = maybeError.hint ? ` Hint: ${maybeError.hint}` : '';
+            errorMessage = `[${code}] ${message}${details}${hint}`;
+            console.error('[ConnectPage] Supabase PostgREST Error:', { code, message, details, hint });
+          } else if ('message' in err && typeof err.message === 'string') {
+            errorMessage = err.message;
+          } else {
+            errorMessage = 'We’re having trouble connecting right now. Please refresh or check your network.';
+          }
+        } else {
+          errorMessage = 'Unexpected error: ' + String(err);
+        }
+
+        setError(errorMessage);
+        setIncomingRequests([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRequests();
+
+    const channel = supabase
+      .channel('support-requests')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'support_requests',
+          filter: 'status=eq.pending'
+        },
+        (payload) => {
+          const newRequest = payload.new as SupportRequest;
+          if (newRequest.user_id !== user.id) {
+            setIncomingRequests(prev => {
+              if (prev.some(req => req.id === newRequest.id)) return prev;
+              return [{ ...newRequest, requester_name: 'Someone' }, ...prev];
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'support_requests',
+          filter: `status=in.(matched,completed,cancelled),user_id=eq.${user.id}`
+        },
+        (payload) => {
+          const updatedRequest = payload.new as SupportRequest;
+          if (updatedRequest.status === 'matched' && updatedRequest.session_id) {
+            setMatchedRequests(prev => ({
+              ...prev,
+              [updatedRequest.id]: true
+            }));
+            
+            // Show toast notification to requester
+            setError(`✅ Your request has been accepted! Redirecting to call...`);
+            
+            // Auto-redirect after 3 seconds
+            setTimeout(() => {
+              router.push(`/call/${updatedRequest.session_id}`);
+            }, 3000);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'support_requests',
+          filter: 'status=in.(matched,completed,cancelled)'
+        },
+        (payload) => {
+          const updatedRequest = payload.new as SupportRequest;
+          setIncomingRequests(prev => prev.filter(req => req.id !== updatedRequest.id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, router]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -271,38 +287,8 @@ useEffect(() => {
     return null;
   }
 
-  const createLiveKitRoom = async (sessionId: string, sessionType: RequestType): Promise<string> => {
-    try {
-      const response = await fetch('/api/livekit/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          roomName: sessionId,
-          isHost: true,
-          sessionType
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to get LiveKit token: ${response.statusText}`);
-      }
-
-      const { url, token } = await response.json();
-      if (!url || !token) {
-        throw new Error('Missing LiveKit connection details');
-      }
-
-      return sessionId;
-    } catch (error) {
-      console.error('Error creating LiveKit room:', error);
-      throw error;
-    }
-  };
-
   const createSupportSession = async (requestType: RequestType, griefType: GriefType): Promise<Session> => {
-   const sessionId = uuidv4();
+    const sessionId = uuidv4();
     const sessionType = requestType;
     const title = requestType === 'one_on_one' 
       ? `One-on-One Support` 
@@ -331,41 +317,50 @@ useEffect(() => {
 
   const acceptRequest = async (request: SupportRequest) => {
     if (!user || acceptingRequestId === request.id) return;
-    
+
+    if (request.user_id === user.id) {
+      setError('You cannot accept your own support request.');
+      return;
+    }
+
     setAcceptingRequestId(request.id);
     setError(null);
 
     try {
+      console.log('[acceptRequest] Accepting request:', request.id);
+
       const { error: updateError } = await supabase
         .from('support_requests')
         .update({ 
           status: 'matched',
           matched_at: new Date().toISOString(),
         })
-        .eq('id', request.id)
-        .select()
-        .single();
+        .eq('id', request.id);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('[acceptRequest] Failed to update request:', updateError);
+        throw new Error(`Failed to update request: ${updateError.message}`);
+      }
 
-      let session;
-      
+      let session: Session;
+
       if (!request.session_id) {
+        console.log('[acceptRequest] Creating new session...');
         session = await createSupportSession(request.request_type, request.grief_type);
         
-        const { error: sessionUpdateError } = await supabase
+        const { error: linkError } = await supabase
           .from('support_requests')
           .update({ session_id: session.id })
           .eq('id', request.id);
-          
-        if (sessionUpdateError) throw sessionUpdateError;
+
+        if (linkError) throw linkError;
       } else {
         const { data: sessionData, error: sessionError } = await supabase
           .from('sessions')
           .select('*')
           .eq('id', request.session_id)
           .single();
-          
+
         if (sessionError) throw sessionError;
         session = sessionData;
       }
@@ -378,26 +373,14 @@ useEffect(() => {
       const { error: participantError } = await supabase
         .from('session_participants')
         .upsert(participantRecords);
-        
+
       if (participantError) throw participantError;
 
-      if (session.status === 'pending') {
-        await createLiveKitRoom(session.id, session.session_type as RequestType);
-        
-        const { error: statusError } = await supabase
-          .from('sessions')
-          .update({ status: 'active' })
-          .eq('id', session.id);
-          
-        if (statusError) throw statusError;
-      }
-
-      setTimeout(() => {
-        router.push(`/call/${session.id}`);
-      }, 500);
-
+      // Notify requester via real-time update (handled by their subscription)
+      // Redirect acceptor immediately
+      router.push(`/call/${session.id}`);
     } catch (err) {
-      console.error('Error accepting request:', err);
+      console.error('[acceptRequest] Error:', err);
       setError(err instanceof Error ? err.message : 'Failed to accept request. Please try again.');
     } finally {
       setAcceptingRequestId(null);
@@ -447,6 +430,10 @@ useEffect(() => {
       
       setError('Your support request has been posted! You\'ll be notified when someone accepts.');
 
+      // Redirect to call page after 5 seconds to show pending state
+      setTimeout(() => {
+        router.push(`/call/${session.id}`);
+      }, 5000);
     } catch (err) {
       console.error('Error posting request:', err);
       setError(err instanceof Error ? err.message : 'Failed to post your request. Please try again.');
@@ -469,37 +456,35 @@ useEffect(() => {
   };
 
   const quickActions = [
-  {
-    id: 'one-on-one',
-    title: 'Talk One-on-One',
-    description: 'Get matched instantly with someone who\'s been there.',
-    icon: <MessageCircle className="h-6 w-6 text-primary" />,
-    type: 'one_on_one' as RequestType,
-    // no href
-  },
-  {
-    id: 'group-call',
-    title: 'Join a Group Call',
-    description: 'Share and listen in a supportive, real-time circle.',
-    icon: <UsersIcon className="h-6 w-6 text-primary" />,
-    type: 'group' as RequestType,
-    // no href
-  },
-  {
-    id: 'live-rooms',
-    title: 'Live Chat Rooms',
-    description: 'Drop into topic-based conversations happening now.',
-    icon: <Mic className="h-6 w-6 text-primary" />,
-    href: '/connect/rooms', // only this has href
-  },
-] satisfies Array<{
-  id: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  type?: RequestType;
-  href?: string;
-}>;
+    {
+      id: 'one-on-one',
+      title: 'Talk One-on-One',
+      description: 'Get matched instantly with someone who\'s been there.',
+      icon: <MessageCircle className="h-6 w-6 text-primary" />,
+      type: 'one_on_one' as RequestType,
+    },
+    {
+      id: 'group-call',
+      title: 'Join a Group Call',
+      description: 'Share and listen in a supportive, real-time circle.',
+      icon: <UsersIcon className="h-6 w-6 text-primary" />,
+      type: 'group' as RequestType,
+    },
+    {
+      id: 'live-rooms',
+      title: 'Live Chat Rooms',
+      description: 'Drop into topic-based conversations happening now.',
+      icon: <Mic className="h-6 w-6 text-primary" />,
+      href: '/connect/rooms',
+    },
+  ] satisfies Array<{
+    id: string;
+    title: string;
+    description: string;
+    icon: React.ReactNode;
+    type?: RequestType;
+    href?: string;
+  }>;
 
   if (loading) {
     return (
@@ -515,7 +500,6 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-stone-50 py-10 px-4 sm:px-6">
       <div className="max-w-6xl mx-auto space-y-12">
-        {/* Hero */}
         <div className="text-center space-y-4">
           <h1 className="text-3xl md:text-4xl font-bold text-stone-800">
             You Are Not Alone
@@ -542,13 +526,21 @@ useEffect(() => {
 
         {error && (
           <div className={`p-4 rounded-lg text-sm font-medium ${
-            error.includes('success') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+            error.includes('success') || error.includes('✅') 
+              ? 'bg-green-50 text-green-700' 
+              : 'bg-red-50 text-red-700'
           }`}>
             {error}
           </div>
         )}
 
-        {/* Incoming Requests */}
+        {Object.values(matchedRequests).some(v => v) && (
+          <div className="bg-green-50 p-4 rounded-lg text-green-700 text-center">
+            <CheckCircle className="h-5 w-5 text-green-500 inline-block mr-2" />
+            <span>Your call is being set up! You'll be connected shortly...</span>
+          </div>
+        )}
+
         {incomingRequests.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-6">
@@ -626,7 +618,6 @@ useEffect(() => {
           </section>
         )}
 
-        {/* Quick Connect */}
         <section>
           <h2 className="text-2xl font-semibold text-center mb-8 text-stone-800">Or Start a Conversation</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -639,38 +630,36 @@ useEffect(() => {
                   </div>
                 </CardHeader>
                 <CardContent>
-  <p className="text-stone-600 text-sm mb-4">
-    {action.description}
-  </p>
-  {'href' in action && action.href ? (
-    <Link href={action.href} className="block w-full">
-      <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white">
-        Connect Now
-      </Button>
-    </Link>
-  ) : (
-    <Button
-      className="w-full bg-amber-500 hover:bg-amber-600 text-white"
-      onClick={() => {
-        // Only items without href should have 'type'
-        if ('type' in action && action.type) {
-          setRequestType(action.type);
-          setGriefType('');
-          setRequestDescription('');
-          setShowPostRequestModal(true);
-        }
-      }}
-    >
-      Connect Now
-    </Button>
-  )}
-</CardContent>
+                  <p className="text-stone-600 text-sm mb-4">
+                    {action.description}
+                  </p>
+                  {'href' in action && action.href ? (
+                    <Link href={action.href} className="block w-full">
+                      <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white">
+                        Connect Now
+                      </Button>
+                    </Link>
+                  ) : (
+                    <Button
+                      className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+                      onClick={() => {
+                        if ('type' in action && action.type) {
+                          setRequestType(action.type);
+                          setGriefType('');
+                          setRequestDescription('');
+                          setShowPostRequestModal(true);
+                        }
+                      }}
+                    >
+                      Connect Now
+                    </Button>
+                  )}
+                </CardContent>
               </Card>
             ))}
           </div>
         </section>
 
-        {/* Post Request Modal */}
         {showPostRequestModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-xl shadow-lg w-full max-w-md">
