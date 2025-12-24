@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient, type AuthResponse, type Session } from '@supabase/supabase-js';
+import { createClient, type Session } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,61 +14,51 @@ export function useClientAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let isSubscribed = true;
+    let isMounted = true;
 
-    const fetchUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (isSubscribed) {
-        if (session?.user && session.user.email) {
-          const name =
-            session.user.user_metadata?.full_name ||
-            session.user.email.split('@')[0] ||
-            'User';
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            name,
-          });
-        } else {
-          setUser(null);
-        }
-        setLoading(false);
+    // 1. Fetch initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (isMounted) {
+        handleSession(session);
+        setLoading(false); // ✅ Only set loading false once, after initial resolve
       }
-    };
+    });
 
-    fetchUser();
-
-    // Correct subscription setup
+    // 2. Listen for future changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_, session: Session | null) => {
-        if (isSubscribed) {
-          if (session?.user && session.user.email) {
-            const name =
-              session.user.user_metadata?.full_name ||
-              session.user.email.split('@')[0] ||
-              'User';
-            setUser({
-              id: session.user.id,
-              email: session.user.email,
-              name,
-            });
-          } else {
-            setUser(null);
-          }
+      (_, session) => {
+        if (isMounted) {
+          handleSession(session);
+          // ❌ Do NOT setLoading(false) here — loading is only for initial state
         }
       }
     );
 
     return () => {
-      isSubscribed = false;
+      isMounted = false;
       subscription.unsubscribe();
     };
+
+    function handleSession(session: Session | null) {
+      if (session?.user && session.user.email) {
+        const name =
+          session.user.user_metadata?.full_name ||
+          session.user.email.split('@')[0] ||
+          'User';
+        setUser({
+          id: session.user.id,
+          email: session.user.email,
+          name,
+        });
+      } else {
+        setUser(null);
+      }
+    }
   }, []);
 
   const logout = async () => {
     await supabase.auth.signOut();
-    setUser(null);
+    // setUser(null); // Optional: listener will handle this, but safe to keep
   };
 
   return { user, logout, loading };
