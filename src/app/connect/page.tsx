@@ -106,33 +106,6 @@ if (!user) {
 }
  
 
-  useEffect(() => {
-  if (!user) return; // user guaranteed non-null due to guard, but safe
-
-  const fetchProfile = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (error) {
-        // If profile doesn't exist, optionally create one or redirect to onboarding
-        console.warn('Profile not found. You may need to create one.');
-        setProfile({ id: user.id, full_name: null, grief_types: [], accepts_calls: true });
-        return;
-      }
-
-      setProfile(data);
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-      setError('Failed to load your profile. Please reload.');
-    }
-  };
-
-  fetchProfile();
-}, [user]); // Re-run if user changes (e.g., after sign-in)
 useEffect(() => {
   if (!user) return; // user guaranteed non-null due to guard, but safe
 
