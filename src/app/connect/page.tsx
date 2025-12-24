@@ -30,7 +30,7 @@ import {
   Clock,
   X
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase'; // ✅
 
 type GriefType =
   | 'parent'
@@ -73,6 +73,7 @@ interface Session {
 
 export default function ConnectPage() {
   // ✅ ALL HOOKS DECLARED FIRST — NO CONDITIONS ABOVE
+  const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [profile, setProfile] = useState<any>(null);

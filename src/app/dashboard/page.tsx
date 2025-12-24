@@ -17,8 +17,8 @@ import {
   MapPin,
   Globe,
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+
+import { createClient } from '@/lib/supabase'; // ✅
 import { v4 as uuidv4 } from 'uuid';
 
 type GriefType =
@@ -76,6 +76,7 @@ interface Post {
 }
 
 export default function DashboardPage() {
+  const supabase = createClient(); 
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);

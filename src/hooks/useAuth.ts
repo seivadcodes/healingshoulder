@@ -3,28 +3,27 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase'; // Your Supabase client
+import { createClient } from '@/lib/supabase';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const supabase = createClient();
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
   }, []);
 
   const signUp = useCallback(
     async (email: string, password: string, options?: { data?: Record<string, any> }) => {
+      const supabase = createClient();
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: options?.data,
+          data: options?.data, // ✅ 'data' is a valid key
           emailRedirectTo: typeof window !== 'undefined' ? window.location.origin + '/connect' : undefined,
         },
       });
@@ -35,25 +34,25 @@ export function useAuth() {
   );
 
   const signOut = useCallback(async () => {
+    const supabase = createClient();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   }, []);
 
   useEffect(() => {
     let isSubscribed = true;
+    const supabase = createClient();
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data }) => {
       if (isSubscribed) {
-        setUser(session?.user ?? null);
+        setUser(data.session?.user || null);
         setLoading(false);
       }
     });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (isSubscribed) {
-        setUser(session?.user ?? null);
+        setUser(session?.user || null);
         setLoading(false);
       }
     });
@@ -64,11 +63,5 @@ export function useAuth() {
     };
   }, []);
 
-  return {
-    user,
-    loading,
-    signIn,
-    signUp,
-    signOut,
-  };
+  return { user, loading, signIn, signUp, signOut };
 }
