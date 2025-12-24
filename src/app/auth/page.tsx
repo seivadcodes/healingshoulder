@@ -1,5 +1,8 @@
 'use client';
 
+// ✅ Disable static generation to avoid build-time Supabase/client errors
+export const dynamic = 'force-dynamic';
+
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -25,7 +28,6 @@ export default function AuthPage() {
 
     try {
       if (isSignUp) {
-        // ✅ Correct Supabase v2+ format: single object
         await signUp(email, password, {
           data: { full_name: fullName.trim() || null }
         });
@@ -91,13 +93,13 @@ export default function AuthPage() {
               Email
             </label>
             <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={styles.input}
-              required
-            />
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={styles.input}
+                required
+              />
           </div>
 
           <div>
@@ -146,7 +148,6 @@ export default function AuthPage() {
   );
 }
 
-// 👇 All styles in one clean object
 const styles = {
   centered: {
     minHeight: '100vh',
