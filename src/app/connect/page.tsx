@@ -1,10 +1,9 @@
 ﻿// src/app/connect/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
 import { 
   Card, 
@@ -14,8 +13,9 @@ import {
   CardFooter
 } from '@/components/ui/card';
 import Button from '@/components/ui/button';
-import { Input } from '@/components/ui/input'; // Added missing component
+import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/useAuth';
+import { PostgrestError } from '@supabase/supabase-js';
 
 import { 
   Users, 
@@ -31,7 +31,6 @@ import {
   X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-
 
 type GriefType =
   | 'parent'
@@ -49,7 +48,7 @@ type RequestType = 'one_on_one' | 'group';
 
 interface SupportRequest {
   id: string;
-  user_id: string; // Fixed from requester_id → user_id
+  user_id: string;
   grief_type: GriefType;
   request_type: RequestType;
   description: string;
@@ -73,7 +72,8 @@ interface Session {
 }
 
 export default function ConnectPage() {
- const { user, loading: authLoading } = useAuth();
+  // ✅ ALL HOOKS DECLARED FIRST — NO CONDITIONS ABOVE
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [profile, setProfile] = useState<any>(null);
   const [onlineCount, setOnlineCount] = useState<number>(0);
@@ -87,79 +87,59 @@ export default function ConnectPage() {
   const [error, setError] = useState<string | null>(null);
   const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
 
-// 🔒 1. Show loading while auth system initializes
-if (authLoading) {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center">
-        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-amber-500" />
-        <p className="text-stone-600">Loading your space...</p>
-      </div>
-    </div>
-  );
-}
+  // 🔁 Fetch profile
+  useEffect(() => {
+    if (!user) return;
 
-// 🔒 2. Redirect to login if not authenticated
-if (!user) {
-  router.push('/auth');
-  return null;
-}
+    const fetchProfile = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
 
-// ✅ Only ONE useEffect for fetching profile
-useEffect(() => {
-  if (!user) return; // user guaranteed non-null due to guard, but safe
+        if (error) {
+          console.warn('Profile not found. You may need to create one.');
+          setProfile({ id: user.id, full_name: null, grief_types: [], accepts_calls: true });
+          return;
+        }
 
-  const fetchProfile = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (error) {
-        // If profile doesn't exist, optionally create one or redirect to onboarding
-        console.warn('Profile not found. You may need to create one.');
-        setProfile({ id: user.id, full_name: null, grief_types: [], accepts_calls: true });
-        return;
+        setProfile(data);
+      } catch (err) {
+        console.error('Error fetching profile:', err);
+        setError('Failed to load your profile. Please reload.');
       }
+    };
 
-      setProfile(data);
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-      setError('Failed to load your profile. Please reload.');
-    }
-  };
+    fetchProfile();
+  }, [user]);
 
-  fetchProfile();
-}, [user]); // Re-run if user changes (e.g., after sign-in)
+  // 🔁 Fetch online count
+  useEffect(() => {
+    const fetchOnlineCount = async () => {
+      try {
+        const { count, error } = await supabase
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('accepts_calls', true);
 
-// 🔑 2. Fetch online count (independent of profile)
-useEffect(() => {
-  const fetchOnlineCount = async () => {
-    try {
-      const { count, error } = await supabase
-        .from('profiles')
-        .select('*', { count: 'exact', head: true })
-        .eq('accepts_calls', true);
+        if (error) throw error;
+        setOnlineCount(count || 0);
+      } catch (err) {
+        console.error('Error fetching online count:', err);
+        setOnlineCount(50);
+      }
+    };
 
-      if (error) throw error;
-      setOnlineCount(count || 0);
-    } catch (err) {
-      console.error('Error fetching online count:', err);
-      setOnlineCount(50); // fallback
-    }
-  };
+    fetchOnlineCount();
+    const interval = setInterval(fetchOnlineCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
-  fetchOnlineCount();
-  const interval = setInterval(fetchOnlineCount, 30000);
-  return () => clearInterval(interval);
-}, []);
-
-// 🔑 3. Fetch & subscribe to incoming support requests
+ // 🔁 Fetch & subscribe to incoming requests
 useEffect(() => {
   if (!user || !profile || !profile.grief_types?.length) {
-    // If no grief types, no relevant requests → clear list
     setIncomingRequests([]);
     return;
   }
@@ -167,6 +147,9 @@ useEffect(() => {
   const fetchRequests = async () => {
     try {
       setLoading(true);
+
+      console.debug('[ConnectPage] Fetching support requests for grief types:', profile.grief_types);
+      console.debug('[ConnectPage] Current user ID:', user.id);
 
       const { data, error } = await supabase
         .from('support_requests')
@@ -176,10 +159,20 @@ useEffect(() => {
         `)
         .in('grief_type', profile.grief_types)
         .eq('status', 'pending')
-        .neq('user_id', user.id) // ← now safe: user.id exists
+        .neq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Supabase Error] Failed to fetch support_requests:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+        throw error;
+      }
+
+      console.debug('[ConnectPage] Fetched support requests:', data);
 
       const formattedRequests = (data || []).map(req => ({
         ...req,
@@ -187,10 +180,41 @@ useEffect(() => {
       }));
 
       setIncomingRequests(formattedRequests);
-    } catch (err) {
-      console.error('Error fetching requests:', err);
-      setError('Failed to load support requests. Please try again.');
-    } finally {
+    } // Inside the catch block
+catch (err) {
+  console.error('[ConnectPage] Error in fetchRequests catch block:', err);
+
+  let errorMessage = 'Failed to load support requests. Please try again.';
+
+  // Handle Supabase PostgREST errors
+  if (err && typeof err === 'object') {
+    const maybeError = err as Partial<PostgrestError>;
+
+    if (maybeError.code) {
+      // This is likely a PostgREST error
+      const code = maybeError.code;
+      const message = maybeError.message || 'Unknown database error';
+      const details = maybeError.details ? ` Details: ${maybeError.details}` : '';
+      const hint = maybeError.hint ? ` Hint: ${maybeError.hint}` : '';
+
+      errorMessage = `[${code}] ${message}${details}${hint}`;
+      console.error('[ConnectPage] Supabase PostgREST Error:', { code, message, details, hint });
+    } else if ('message' in err && typeof err.message === 'string') {
+      // Standard JS Error or similar
+      errorMessage = err.message;
+    } else {
+      // Truly opaque error (e.g., {})
+      console.warn('[ConnectPage] Received an opaque error object with no useful info:', err);
+      errorMessage = 'We’re having trouble connecting right now. Please refresh or check your network.';
+    }
+  } else {
+    // Not an object (e.g., string, null, undefined)
+    errorMessage = 'Unexpected error: ' + String(err);
+  }
+
+  setError(errorMessage);
+  setIncomingRequests([]);
+}finally {
       setLoading(false);
     }
   };
@@ -239,11 +263,27 @@ useEffect(() => {
   return () => {
     supabase.removeChannel(channel);
   };
-}, [user, profile]); // Only re-run when user or profile changes
+}, [user, profile]);
+
+  // ✅ NOW SAFE TO USE EARLY RETURNS
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-amber-500" />
+          <p className="text-stone-600">Loading your space...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    router.push('/auth');
+    return null;
+  }
 
   const createLiveKitRoom = async (sessionId: string, sessionType: RequestType): Promise<string> => {
     try {
-      // Get LiveKit token with appropriate permissions
       const response = await fetch('/api/livekit/token', {
         method: 'POST',
         headers: {
@@ -273,13 +313,12 @@ useEffect(() => {
   };
 
   const createSupportSession = async (requestType: RequestType, griefType: GriefType): Promise<Session> => {
-    const sessionId = `session-${uuidv4()}`;
+   const sessionId = `session-${uuidv4()}`;
     const sessionType = requestType;
     const title = requestType === 'one_on_one' 
       ? `One-on-One Support` 
       : `Group Support Circle`;
     
-    // Create session in database
     const { data, error } = await supabase
       .from('sessions')
       .insert({
@@ -308,7 +347,6 @@ useEffect(() => {
     setError(null);
 
     try {
-      // Update request status to matched
       const { error: updateError } = await supabase
         .from('support_requests')
         .update({ 
@@ -323,11 +361,9 @@ useEffect(() => {
 
       let session;
       
-      // If request doesn't have a session yet, create one
       if (!request.session_id) {
         session = await createSupportSession(request.request_type, request.grief_type);
         
-        // Update the request with the new session ID
         const { error: sessionUpdateError } = await supabase
           .from('support_requests')
           .update({ session_id: session.id })
@@ -335,7 +371,6 @@ useEffect(() => {
           
         if (sessionUpdateError) throw sessionUpdateError;
       } else {
-        // Get existing session details
         const { data: sessionData, error: sessionError } = await supabase
           .from('sessions')
           .select('*')
@@ -346,10 +381,9 @@ useEffect(() => {
         session = sessionData;
       }
 
-      // Add both users as participants to the session
       const participantRecords = [
         { session_id: session.id, user_id: user.id, joined_at: new Date().toISOString() },
-        { session_id: session.id, user_id: request.user_id, joined_at: new Date().toISOString() } // Fixed requester_id → user_id
+        { session_id: session.id, user_id: request.user_id, joined_at: new Date().toISOString() }
       ];
       
       const { error: participantError } = await supabase
@@ -358,11 +392,9 @@ useEffect(() => {
         
       if (participantError) throw participantError;
 
-      // Create LiveKit room if it doesn't exist yet or if session is pending
       if (session.status === 'pending') {
         await createLiveKitRoom(session.id, session.session_type as RequestType);
         
-        // Update session status to active
         const { error: statusError } = await supabase
           .from('sessions')
           .update({ status: 'active' })
@@ -371,7 +403,6 @@ useEffect(() => {
         if (statusError) throw statusError;
       }
 
-      // Redirect to call room after short delay to allow UI update
       setTimeout(() => {
         router.push(`/call/${session.id}`);
       }, 500);
@@ -394,15 +425,13 @@ useEffect(() => {
       const requestId = uuidv4();
       const requestTypeValue = requestType as RequestType;
       
-      // Create a session first for this request
       const session = await createSupportSession(requestTypeValue, griefType);
       
-      // Create the support request
       const { error } = await supabase
         .from('support_requests')
         .insert({
           id: requestId,
-          user_id: user.id, // Fixed field name
+          user_id: user.id,
           grief_type: griefType,
           request_type: requestTypeValue,
           description: requestDescription.trim(),
@@ -413,7 +442,6 @@ useEffect(() => {
 
       if (error) throw error;
       
-      // Add requester as first participant in the session
       const { error: participantError } = await supabase
         .from('session_participants')
         .insert({
@@ -428,7 +456,6 @@ useEffect(() => {
       setRequestDescription('');
       setGriefType('');
       
-      // Show success message
       setError('Your support request has been posted! You\'ll be notified when someone accepts.');
 
     } catch (err) {
@@ -453,28 +480,37 @@ useEffect(() => {
   };
 
   const quickActions = [
-    {
-      id: 'one-on-one',
-      title: 'Talk One-on-One',
-      description: 'Get matched instantly with someone who\'s been there.',
-      icon: <MessageCircle className="h-6 w-6 text-primary" />,
-      href: '/connect/one-on-one',
-    },
-    {
-      id: 'group-call',
-      title: 'Join a Group Call',
-      description: 'Share and listen in a supportive, real-time circle.',
-      icon: <UsersIcon className="h-6 w-6 text-primary" />,
-      href: '/connect/group-call',
-    },
-    {
-      id: 'live-rooms',
-      title: 'Live Chat Rooms',
-      description: 'Drop into topic-based conversations happening now.',
-      icon: <Mic className="h-6 w-6 text-primary" />,
-      href: '/connect/rooms',
-    },
-  ];
+  {
+    id: 'one-on-one',
+    title: 'Talk One-on-One',
+    description: 'Get matched instantly with someone who\'s been there.',
+    icon: <MessageCircle className="h-6 w-6 text-primary" />,
+    type: 'one_on_one' as RequestType,
+    // no href
+  },
+  {
+    id: 'group-call',
+    title: 'Join a Group Call',
+    description: 'Share and listen in a supportive, real-time circle.',
+    icon: <UsersIcon className="h-6 w-6 text-primary" />,
+    type: 'group' as RequestType,
+    // no href
+  },
+  {
+    id: 'live-rooms',
+    title: 'Live Chat Rooms',
+    description: 'Drop into topic-based conversations happening now.',
+    icon: <Mic className="h-6 w-6 text-primary" />,
+    href: '/connect/rooms', // only this has href
+  },
+] satisfies Array<{
+  id: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  type?: RequestType;
+  href?: string;
+}>;
 
   if (loading) {
     return (
@@ -614,15 +650,32 @@ useEffect(() => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-stone-600 text-sm mb-4">
-                    {action.description}
-                  </p>
-                  <Link href={action.href} className="block w-full">
-                    <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white">
-                      Connect Now
-                    </Button>
-                  </Link>
-                </CardContent>
+  <p className="text-stone-600 text-sm mb-4">
+    {action.description}
+  </p>
+  {'href' in action && action.href ? (
+    <Link href={action.href} className="block w-full">
+      <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white">
+        Connect Now
+      </Button>
+    </Link>
+  ) : (
+    <Button
+      className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+      onClick={() => {
+        // Only items without href should have 'type'
+        if ('type' in action && action.type) {
+          setRequestType(action.type);
+          setGriefType('');
+          setRequestDescription('');
+          setShowPostRequestModal(true);
+        }
+      }}
+    >
+      Connect Now
+    </Button>
+  )}
+</CardContent>
               </Card>
             ))}
           </div>
@@ -690,7 +743,7 @@ useEffect(() => {
                   <select
                     id="grief-type"
                     value={griefType}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setGriefType(e.target.value as GriefType)} // Fixed event typing
+                    onChange={(e) => setGriefType(e.target.value as GriefType)}
                     className="w-full p-2.5 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
                   >
                     <option value="">Select a grief experience</option>
@@ -703,24 +756,24 @@ useEffect(() => {
                 </div>
                 
                 <div>
-  <label htmlFor="description" className="block text-sm font-medium text-stone-700 mb-2">
-    What would help right now?
-  </label>
-  <textarea
-    id="description"
-    value={requestDescription}
-    onChange={(e) => setRequestDescription(e.target.value)}
-    placeholder={
-      requestType === 'one_on_one'
-        ? "I'm looking for someone who's also lost a parent to talk with today..."
-        : "I'd like to join a group to share about coping with holidays after loss..."
-    }
-    className="min-h-[100px] w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-  />
-  <p className="text-xs text-stone-500 mt-1">
-    Be as specific or general as you're comfortable with. This helps us match you with the right person.
-  </p>
-</div>
+                  <label htmlFor="description" className="block text-sm font-medium text-stone-700 mb-2">
+                    What would help right now?
+                  </label>
+                  <textarea
+                    id="description"
+                    value={requestDescription}
+                    onChange={(e) => setRequestDescription(e.target.value)}
+                    placeholder={
+                      requestType === 'one_on_one'
+                        ? "I'm looking for someone who's also lost a parent to talk with today..."
+                        : "I'd like to join a group to share about coping with holidays after loss..."
+                    }
+                    className="min-h-[100px] w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                  />
+                  <p className="text-xs text-stone-500 mt-1">
+                    Be as specific or general as you're comfortable with. This helps us match you with the right person.
+                  </p>
+                </div>
                 
                 <div className="flex justify-end gap-3 pt-2 border-t border-stone-200">
                   <Button
