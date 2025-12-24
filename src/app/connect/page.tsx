@@ -138,9 +138,9 @@ export default function ConnectPage() {
     return () => clearInterval(interval);
   }, []);
 
- // 🔁 Fetch & subscribe to incoming requests
+ // 🔁 Fetch & subscribe to incoming requests — SHOW ALL (no grief type filtering)
 useEffect(() => {
-  if (!user || !profile || !profile.grief_types?.length) {
+  if (!user) {
     setIncomingRequests([]);
     return;
   }
@@ -149,7 +149,7 @@ useEffect(() => {
     try {
       setLoading(true);
 
-      console.debug('[ConnectPage] Fetching support requests for grief types:', profile.grief_types);
+      console.debug('[ConnectPage] Fetching ALL support requests (no grief type filter)');
       console.debug('[ConnectPage] Current user ID:', user.id);
 
       const { data, error } = await supabase
@@ -158,9 +158,8 @@ useEffect(() => {
           *,
           profiles:user_id ( full_name )
         `)
-        .in('grief_type', profile.grief_types)
         .eq('status', 'pending')
-        .neq('user_id', user.id)
+        .neq('user_id', user.id) // Don't show your own requests
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -181,48 +180,39 @@ useEffect(() => {
       }));
 
       setIncomingRequests(formattedRequests);
-    } // Inside the catch block
-catch (err) {
-  console.error('[ConnectPage] Error in fetchRequests catch block:', err);
+    } catch (err) {
+      console.error('[ConnectPage] Error in fetchRequests catch block:', err);
 
-  let errorMessage = 'Failed to load support requests. Please try again.';
+      let errorMessage = 'Failed to load support requests. Please try again.';
 
-  // Handle Supabase PostgREST errors
-  if (err && typeof err === 'object') {
-    const maybeError = err as Partial<PostgrestError>;
+      if (err && typeof err === 'object') {
+        const maybeError = err as Partial<PostgrestError>;
+        if (maybeError.code) {
+          const code = maybeError.code;
+          const message = maybeError.message || 'Unknown database error';
+          const details = maybeError.details ? ` Details: ${maybeError.details}` : '';
+          const hint = maybeError.hint ? ` Hint: ${maybeError.hint}` : '';
+          errorMessage = `[${code}] ${message}${details}${hint}`;
+          console.error('[ConnectPage] Supabase PostgREST Error:', { code, message, details, hint });
+        } else if ('message' in err && typeof err.message === 'string') {
+          errorMessage = err.message;
+        } else {
+          errorMessage = 'We’re having trouble connecting right now. Please refresh or check your network.';
+        }
+      } else {
+        errorMessage = 'Unexpected error: ' + String(err);
+      }
 
-    if (maybeError.code) {
-      // This is likely a PostgREST error
-      const code = maybeError.code;
-      const message = maybeError.message || 'Unknown database error';
-      const details = maybeError.details ? ` Details: ${maybeError.details}` : '';
-      const hint = maybeError.hint ? ` Hint: ${maybeError.hint}` : '';
-
-      errorMessage = `[${code}] ${message}${details}${hint}`;
-      console.error('[ConnectPage] Supabase PostgREST Error:', { code, message, details, hint });
-    } else if ('message' in err && typeof err.message === 'string') {
-      // Standard JS Error or similar
-      errorMessage = err.message;
-    } else {
-      // Truly opaque error (e.g., {})
-      console.warn('[ConnectPage] Received an opaque error object with no useful info:', err);
-      errorMessage = 'We’re having trouble connecting right now. Please refresh or check your network.';
-    }
-  } else {
-    // Not an object (e.g., string, null, undefined)
-    errorMessage = 'Unexpected error: ' + String(err);
-  }
-
-  setError(errorMessage);
-  setIncomingRequests([]);
-}finally {
+      setError(errorMessage);
+      setIncomingRequests([]);
+    } finally {
       setLoading(false);
     }
   };
 
   fetchRequests();
 
-  // 🔁 Real-time subscription
+  // 🔁 Real-time subscription — listen to all new pending requests
   const channel = supabase
     .channel('support-requests')
     .on(
@@ -235,10 +225,8 @@ catch (err) {
       },
       (payload) => {
         const newRequest = payload.new as SupportRequest;
-        if (
-          profile.grief_types?.includes(newRequest.grief_type) &&
-          newRequest.user_id !== user.id
-        ) {
+        // ✅ Show to everyone except the requester
+        if (newRequest.user_id !== user.id) {
           setIncomingRequests(prev => {
             if (prev.some(req => req.id === newRequest.id)) return prev;
             return [{ ...newRequest, requester_name: 'Someone' }, ...prev];
@@ -264,7 +252,7 @@ catch (err) {
   return () => {
     supabase.removeChannel(channel);
   };
-}, [user, profile]);
+}, [user]); // ✅ Only depend on `user` — not `profile` anymore
 
   // ✅ NOW SAFE TO USE EARLY RETURNS
   if (authLoading) {
