@@ -17,7 +17,9 @@ import {
   MapPin,
   Globe,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
+// --- Types ---
 type GriefType =
   | 'parent'
   | 'child'
@@ -65,6 +67,7 @@ interface Post {
   likes: number;
 }
 
+// --- Component ---
 export default function DashboardPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,70 +86,230 @@ export default function DashboardPage() {
   const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [onlineCount, setOnlineCount] = useState(87);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Simulate profile load (replace with Supabase)
+  // --- Fetch real user profile from Supabase ---
   useEffect(() => {
-    // Mock: user has already set grief context
-    const storedProfile: UserProfile = { griefTypes: ['parent', 'pet'] };
-    setProfile(storedProfile);
-    if (storedProfile.griefTypes.length === 0) {
-      setShowGriefSetup(true);
-    }
+    let isSubscribed = true; // prevent state update on unmounted component
 
-    // Simulate live online count
+    const fetchProfile = async () => {
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+
+      if (!isSubscribed) return;
+      if (authError || !session?.user) {
+        console.error('Auth error or no session:', authError);
+        router.push('/auth');
+        setIsLoading(false);
+        return;
+      }
+
+      const { data, error: dbError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!isSubscribed) return;
+      if (dbError) {
+        console.warn('No profile found. Showing grief setup.');
+        if (isSubscribed) {
+          setShowGriefSetup(true);
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // Map Supabase row → UI state
+      const griefTypes = (data.grief_types || []) as GriefType[];
+      setProfile({
+        griefTypes,
+        avatarUrl: data.avatar_url || undefined,
+      });
+
+      setPreferences({
+        acceptsCalls: data.accepts_calls ?? true,
+        acceptFromGenders: data.accept_from_genders || ['any'],
+        acceptFromCountries: data.accept_from_countries || [],
+        acceptFromLanguages: data.accept_from_languages || [],
+        isAnonymous: data.is_anonymous ?? true,
+      });
+
+      if (griefTypes.length === 0) {
+        setShowGriefSetup(true);
+      }
+
+      setIsLoading(false);
+    };
+
+    fetchProfile();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [router]);
+
+  // --- Fetch posts after profile loads ---
+  useEffect(() => {
+    if (!profile || isLoading) return;
+
+    const loadPosts = async () => {
+      const { data, error } = await supabase
+        .from('posts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (error) {
+        console.error('Failed to fetch posts:', error);
+        return;
+      }
+
+      const mapped = data.map((p) => ({
+        id: p.id,
+        text: p.text,
+        mediaUrls: p.media_urls || undefined,
+        griefTypes: p.grief_types as GriefType[],
+        createdAt: new Date(p.created_at),
+        likes: p.likes_count || 0,
+      }));
+
+      setPosts(mapped);
+    };
+
+    loadPosts();
+  }, [profile, isLoading]);
+
+  // --- Simulate online count (replace later with real-time) ---
+  useEffect(() => {
     const interval = setInterval(() => {
-      setOnlineCount(prev => Math.max(10, prev + (Math.random() > 0.5 ? 1 : -1)));
+      setOnlineCount((prev) => Math.max(10, prev + (Math.random() > 0.5 ? 1 : -1)));
     }, 6000);
     return () => clearInterval(interval);
   }, []);
 
   const toggleGriefType = (type: GriefType) => {
-    setSelectedGriefTypes(prev =>
-      prev.includes(type)
-        ? prev.filter(t => t !== type)
-        : [...prev, type]
+    setSelectedGriefTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
   };
 
-  const handleSaveGriefTypes = () => {
+  const saveProfileToDB = async (updates: Record<string, any>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    const { error } = await supabase.from('profiles').upsert({
+      id: session.user.id,
+      updated_at: new Date().toISOString(),
+      ...updates,
+    });
+
+    if (error) {
+      console.error('Profile save error:', error);
+      alert('Failed to save settings. Please try again.');
+    }
+  };
+
+  const handleSaveGriefTypes = async () => {
     if (selectedGriefTypes.length === 0) {
       alert('Please select at least one type of loss.');
       return;
     }
-    const updatedProfile: UserProfile = { griefTypes: selectedGriefTypes };
-    setProfile(updatedProfile);
+    await saveProfileToDB({ grief_types: selectedGriefTypes });
+    setProfile((prev) => ({ ...prev!, griefTypes: selectedGriefTypes }));
     setShowGriefSetup(false);
-    // TODO: save to Supabase `profiles.grief_types`
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const newPreviews = Array.from(files).map(file => URL.createObjectURL(file));
-    setMediaPreviews(prev => [...prev, ...newPreviews].slice(0, 4));
+    const newPreviews = Array.from(files).map((file) => URL.createObjectURL(file));
+    setMediaPreviews((prev) => [...prev, ...newPreviews].slice(0, 4));
   };
 
   const removeMedia = (index: number) => {
-    setMediaPreviews(prev => prev.filter((_, i) => i !== index));
+    setMediaPreviews((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handlePostSubmit = () => {
+  const handlePostSubmit = async () => {
     if (!newPostText.trim() || !profile) return;
+    setIsSubmitting(true);
+
+    let mediaUrls: string[] = [];
+    const files = fileInputRef.current?.files;
+    if (files && files.length > 0) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uploadPromises = Array.from(files).map(async (file) => {
+          const path = `posts/${session?.user.id}/${Date.now()}-${file.name}`;
+          const { error } = await supabase.storage.from('posts').upload(path, file);
+          if (error) throw error;
+          const { data } = supabase.storage.from('posts').getPublicUrl(path);
+          return data.publicUrl;
+        });
+        mediaUrls = await Promise.all(uploadPromises);
+      } catch (err) {
+        console.error('Media upload failed:', err);
+        alert('Failed to upload media. Post saved without images.');
+      }
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const { error } = await supabase.from('posts').insert({
+      user_id: session?.user.id,
+      text: newPostText.trim(),
+      media_urls: mediaUrls.length > 0 ? mediaUrls : null,
+      grief_types: profile.griefTypes,
+      is_anonymous: preferences.isAnonymous,
+      created_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      console.error('Post creation error:', error);
+      alert('Failed to share post. Please try again.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Optimistic UI update
     const newPost: Post = {
       id: `post-${Date.now()}`,
       text: newPostText,
-      mediaUrls: mediaPreviews.length > 0 ? [...mediaPreviews] : undefined,
+      mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
       griefTypes: [...profile.griefTypes],
       createdAt: new Date(),
       likes: 0,
     };
     setPosts([newPost, ...posts]);
+
     setNewPostText('');
     setMediaPreviews([]);
-    // TODO: upload media → create post in Supabase
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setIsSubmitting(false);
   };
 
-  // === Grief Setup Modal ===
+  const toggleAcceptsCalls = async () => {
+    const newValue = !preferences.acceptsCalls;
+    setPreferences((prev) => ({ ...prev, acceptsCalls: newValue }));
+    await saveProfileToDB({ accepts_calls: newValue });
+  };
+
+  const toggleAnonymity = async () => {
+    const newValue = !preferences.isAnonymous;
+    setPreferences((prev) => ({ ...prev, isAnonymous: newValue }));
+    await saveProfileToDB({ is_anonymous: newValue });
+  };
+
+  // ——— LOADING ———
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-stone-50">
+        <p className="text-stone-600">Loading your space...</p>
+      </div>
+    );
+  }
+
+  // ——— GRIEF SETUP MODAL ———
   if (showGriefSetup) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 flex flex-col items-center justify-start">
@@ -194,7 +357,7 @@ export default function DashboardPage() {
     );
   }
 
-  // === Settings Drawer ===
+  // ——— SETTINGS ———
   if (showSettings) {
     return (
       <div className="min-h-screen bg-stone-50 p-4">
@@ -209,11 +372,10 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {/* Grief Context */}
           <div className="mb-6">
             <h3 className="font-medium text-stone-800 mb-2">Your Grief Context</h3>
             <p className="text-sm text-stone-600 mb-2">
-              {profile?.griefTypes.map(t => griefTypeLabels[t]).join(', ') || 'Not set'}
+              {profile?.griefTypes.map((t) => griefTypeLabels[t]).join(', ') || 'Not set'}
             </p>
             <button
               onClick={() => {
@@ -227,9 +389,8 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {/* Call Availability */}
           <div className="mb-6">
-            <label className="flex items-center gap-3">
+            <label className="flex items-center gap-3 cursor-pointer" onClick={toggleAcceptsCalls}>
               <ToggleLeft
                 className={`w-10 h-5 rounded-full p-1 ${
                   preferences.acceptsCalls
@@ -246,7 +407,6 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* Matching Filters (Placeholder – expand later) */}
           <div className="mb-6">
             <h3 className="font-medium text-stone-800 mb-2">Who can connect with you?</h3>
             <div className="space-y-2 text-sm text-stone-600">
@@ -263,20 +423,15 @@ export default function DashboardPage() {
                 <span>Any language</span>
               </div>
             </div>
-            <p className="text-xs text-stone-500 mt-2">
-              Advanced filters coming soon.
-            </p>
+            <p className="text-xs text-stone-500 mt-2">Advanced filters coming soon.</p>
           </div>
 
-          {/* Privacy */}
           <div className="mb-6">
-            <label className="flex items-center gap-2 text-stone-800">
+            <label className="flex items-center gap-2 text-stone-800 cursor-pointer">
               <input
                 type="checkbox"
                 checked={preferences.isAnonymous}
-                onChange={(e) =>
-                  setPreferences(prev => ({ ...prev, isAnonymous: e.target.checked }))
-                }
+                onChange={toggleAnonymity}
                 className="form-checkbox h-4 w-4 text-amber-600 rounded"
               />
               <span>Post and call anonymously</span>
@@ -294,36 +449,40 @@ export default function DashboardPage() {
     );
   }
 
-  // === Main Dashboard ===
+  // ——— MAIN DASHBOARD ———
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 md:p-6 pb-24 pt-4">
+    <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 md:p-6 pb-24 pt-6 md:pt-[120px]">
       <div className="max-w-4xl mx-auto space-y-8">
-        {/* Top Bar: Grief Context + Settings */}
-        <div className="flex justify-between items-start">
-          <div className="max-w-[80%]">
-            <div className="inline-flex flex-wrap gap-1 bg-stone-100 px-3 py-1.5 rounded-full text-sm text-stone-700">
-              {profile?.griefTypes.map((type, i, arr) => (
-                <span key={type} className="flex items-center gap-1">
-                  <Heart size={12} className="text-amber-600" />
-                  {griefTypeLabels[type]}
-                  {i < arr.length - 1 && <span>•</span>}
-                </span>
-              ))}
-              <button
-                onClick={() => setShowGriefSetup(true)}
-                className="text-amber-600 hover:underline flex items-center gap-1 ml-2"
-              >
-                <Edit size={12} />
-                Edit
-              </button>
+        <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 border border-stone-200">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-sm font-medium text-stone-600 mb-1">Your grief context</h2>
+              <div className="flex flex-wrap gap-2">
+                {profile?.griefTypes.map((type) => (
+                  <span
+                    key={type}
+                    className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-sm px-3 py-1.5 rounded-full"
+                  >
+                    <Heart size={12} />
+                    {griefTypeLabels[type]}
+                  </span>
+                ))}
+              </div>
             </div>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-2.5 text-stone-600 hover:text-stone-900 rounded-full hover:bg-stone-200"
+              aria-label="Settings"
+            >
+              <Settings size={20} />
+            </button>
           </div>
           <button
-            onClick={() => setShowSettings(true)}
-            className="p-2 text-stone-600 hover:text-stone-800 rounded-full hover:bg-stone-200"
-            aria-label="Settings"
+            onClick={() => setShowGriefSetup(true)}
+            className="mt-3 text-xs text-amber-600 hover:underline flex items-center gap-1"
           >
-            <Settings size={20} />
+            <Edit size={12} />
+            Edit or add another loss
           </button>
         </div>
 
@@ -335,7 +494,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Post Composer */}
         <section className="bg-white p-4 rounded-xl border border-stone-200">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
@@ -348,8 +506,9 @@ export default function DashboardPage() {
                 placeholder="What’s in your heart today?"
                 className="w-full p-2 text-stone-800 placeholder-stone-500 focus:outline-none resize-none"
                 rows={3}
+                disabled={isSubmitting}
               />
-              
+
               {mediaPreviews.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {mediaPreviews.map((url, i) => (
@@ -374,6 +533,7 @@ export default function DashboardPage() {
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="flex items-center gap-1 text-stone-600 hover:text-amber-600 text-sm"
+                  disabled={isSubmitting}
                 >
                   <Camera size={14} />
                   Photo/Video
@@ -388,22 +548,21 @@ export default function DashboardPage() {
                 />
                 <button
                   onClick={handlePostSubmit}
-                  disabled={!newPostText.trim()}
+                  disabled={!newPostText.trim() || isSubmitting}
                   className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium ${
-                    newPostText.trim()
+                    newPostText.trim() && !isSubmitting
                       ? 'bg-amber-500 text-white hover:bg-amber-600'
                       : 'bg-stone-200 text-stone-400 cursor-not-allowed'
                   }`}
                 >
+                  {isSubmitting ? 'Sharing...' : 'Share'}
                   <Send size={14} />
-                  Share
                 </button>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Recent Posts */}
         <section>
           <h2 className="font-semibold text-stone-800 mb-3">In Your Communities</h2>
           {posts.length === 0 ? (
@@ -427,7 +586,8 @@ export default function DashboardPage() {
                   )}
                   <div className="flex justify-between items-center text-xs text-stone-500 mt-3">
                     <span>
-                      {post.griefTypes.map(t => griefTypeLabels[t]).join(', ')} • anonymous
+                      {post.griefTypes.map((t) => griefTypeLabels[t]).join(', ')} •{' '}
+                      {preferences.isAnonymous ? 'anonymous' : 'you'}
                     </span>
                     <button className="flex items-center gap-1 text-stone-500 hover:text-amber-600">
                       <Heart size={14} /> {post.likes}
@@ -439,7 +599,6 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Quick Actions */}
         <section>
           <h2 className="font-semibold text-stone-800 mb-4">Get Support Now</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

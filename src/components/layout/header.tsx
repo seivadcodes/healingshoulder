@@ -1,29 +1,25 @@
-﻿// src/components/layout/header.tsx
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
-import { Home, User, LogOut, Bell } from 'lucide-react';
+import { Home, User, LogOut } from 'lucide-react';
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useClientAuth } from '@/hooks/useClientAuth';
 import { useState } from 'react';
 
 export default function Header() {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, logout: handleLogout } = useClientAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Optional: hide on homepage only for guests
-  // if (pathname === '/' && !user) return null;
-
-  const handleLogout = () => {
-    logout();
+  const logout = () => {
+    handleLogout();
     setIsMenuOpen(false);
   };
 
   const initials = user
     ? user.name
         .split(' ')
-        .map((n) => n[0])
+        .map((n: string) => n[0]) // ✅ Fixed implicit any
         .join('')
         .toUpperCase()
         .substring(0, 2)
@@ -62,7 +58,7 @@ export default function Header() {
                     Dashboard
                   </Link>
                   <button
-                    onClick={handleLogout}
+                    onClick={logout}
                     className="w-full text-left px-4 py-2 text-sm text-stone-700 hover:bg-stone-100 flex items-center gap-2"
                   >
                     <LogOut size={16} />

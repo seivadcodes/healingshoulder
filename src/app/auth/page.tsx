@@ -1,10 +1,9 @@
-// src/app/auth/page.tsx
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { getSupabaseBrowserClient } from '@/lib/supabase-browser';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -12,9 +11,8 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const { login } = useAuth();
   const router = useRouter();
+  const supabase = getSupabaseBrowserClient();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,8 +20,19 @@ export default function AuthPage() {
     setError('');
 
     try {
-      await login(email, password);
-      // Redirect to dashboard after successful login
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        });
+        if (error) throw error;
+        // Optional: show message that confirmation email was sent
+      }
+      router.refresh(); // Refresh server components
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.');
