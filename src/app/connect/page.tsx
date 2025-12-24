@@ -313,7 +313,7 @@ catch (err) {
   };
 
   const createSupportSession = async (requestType: RequestType, griefType: GriefType): Promise<Session> => {
-   const sessionId = `session-${uuidv4()}`;
+   const sessionId = uuidv4();
     const sessionType = requestType;
     const title = requestType === 'one_on_one' 
       ? `One-on-One Support` 
