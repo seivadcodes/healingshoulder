@@ -240,6 +240,7 @@ throw new Error('Missing token or LiveKit URL in response');
 const newRoom = new Room({
 adaptiveStream: true,
 dynacast: true,
+
 videoCaptureDefaults: {
 resolution: { width: 1280, height: 720 }
 },
@@ -796,34 +797,61 @@ window.removeEventListener('beforeunload', handleBeforeUnload);
 };
 }, [isConnected, room]);
 // Handle browser minimization/tab switching with delayed disconnect
+// Replace your current visibility change useEffect with this improved version
 useEffect(() => {
-const handleVisibilityChange = () => {
-// Clear any existing timeout
-if (visibilityTimeoutRef.current) {
-clearTimeout(visibilityTimeoutRef.current);
-visibilityTimeoutRef.current = null;
-}
-// If tab is hidden/minimized and we're in a call, set a timeout to disconnect
-if (document.visibilityState === 'hidden' && isConnected && room) {
-visibilityTimeoutRef.current = setTimeout(() => {
-// Only disconnect if we're still in the hidden state after 1 minute
-if (document.visibilityState === 'hidden' && isConnected && room) {
-console.log('Disconnecting due to prolonged inactivity');
-leaveRoom();
-}
-}, 60000); // 60 seconds
-}
-};
-// Add event listener for visibility changes
-document.addEventListener('visibilitychange', handleVisibilityChange);
-return () => {
-document.removeEventListener('visibilitychange', handleVisibilityChange);
-// Clear timeout on unmount
-if (visibilityTimeoutRef.current) {
-clearTimeout(visibilityTimeoutRef.current);
-}
-};
-}, [isConnected, room]);
+  const handleVisibilityChange = () => {
+    // Clear any existing timeout
+    if (visibilityTimeoutRef.current) {
+      clearTimeout(visibilityTimeoutRef.current);
+      visibilityTimeoutRef.current = null;
+    }
+    
+    console.log(`Visibility changed to: ${document.visibilityState}`);
+    
+    // If tab is hidden/minimized and we're in a call
+    if (document.visibilityState === 'hidden' && isConnected && room) {
+      console.log('Tab minimized - preserving connection for now');
+      
+      // Set timeout to disconnect only after prolonged inactivity
+      visibilityTimeoutRef.current = setTimeout(() => {
+        if (document.visibilityState === 'hidden' && isConnected && room) {
+          console.log('Disconnecting due to prolonged inactivity (60+ seconds)');
+          leaveRoom();
+        }
+      }, 60000); // 60 seconds
+    } 
+    // Tab is now visible again
+    else if (document.visibilityState === 'visible' && room) {
+      console.log('Tab restored - checking connection status');
+      
+      // Don't immediately reconnect if we're still technically connected
+      // Instead, just verify the connection is healthy
+      if (room.state === 'connected' && localParticipant) {
+        console.log('Connection appears healthy - no reconnection needed');
+        
+        // Reattach media tracks if needed (sometimes they get detached when tab is minimized)
+        if (localVideoRef.current && !isVideoMuted && isVideoEnabled) {
+          // Get the video track and reattach it
+          const videoTrack = Array.from(localParticipant.videoTrackPublications.values())[0]?.track;
+          if (videoTrack && videoTrack.mediaStreamTrack) {
+            console.log('Reattaching video track');
+            localVideoRef.current.srcObject = new MediaStream([videoTrack.mediaStreamTrack]);
+          }
+        }
+      }
+    }
+  };
+
+  // Add event listener for visibility changes
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  return () => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    // Clear timeout on unmount
+    if (visibilityTimeoutRef.current) {
+      clearTimeout(visibilityTimeoutRef.current);
+    }
+  };
+}, [isConnected, room, localParticipant, isVideoMuted, isVideoEnabled]);
 // Auto-scroll chat
 useEffect(() => {
 if (chatContainerRef.current) {
