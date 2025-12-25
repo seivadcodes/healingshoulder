@@ -397,7 +397,7 @@ const NewPostForm = ({
   newPostText: string;
   mediaPreviews: string[];
   isSubmitting: boolean;
-  fileInputRef: React.RefObject<HTMLInputElement>;
+ fileInputRef: React.RefObject<HTMLInputElement | null>;
   setNewPostText: (text: string) => void;
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   removeMedia: (index: number) => void;

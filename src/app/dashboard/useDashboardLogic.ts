@@ -60,7 +60,7 @@ export interface DashboardUIProps {
   isLoading: boolean;
   isSubmitting: boolean;
   error: string | null;
-  fileInputRef: React.RefObject<HTMLInputElement>;
+fileInputRef: React.RefObject<HTMLInputElement | null>;
   
   // Callbacks
   toggleGriefType: (type: GriefType) => void;
