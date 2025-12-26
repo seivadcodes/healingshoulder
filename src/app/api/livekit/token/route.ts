@@ -1,78 +1,64 @@
-// src/app/api/livekit/token/route.ts
+// app/api/livekit/token/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase-server';
 import { AccessToken } from 'livekit-server-sdk';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
 
-export async function POST(request: NextRequest) {
+
+
+export async function POST(req: NextRequest) {
   try {
-    // Get cookies from request
-    const cookieStore = await cookies();
+    const { room } = await req.json();
     
-    // Create Supabase server client
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          set(name: string, value: string) {
-            cookieStore.set(name, value);
-          },
-          remove(name: string) {
-            cookieStore.delete(name);
-          },
-        },
-      }
-    );
-
-    // Get authenticated user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    // Validate room format
+    const roomParts = room.split('-');
+    if (roomParts.length !== 2) {
+      return NextResponse.json({ error: 'Invalid room format' }, { status: 400 });
     }
 
-    // Validate room name
-    const { roomName } = await request.json();
-    if (!roomName || typeof roomName !== 'string' || roomName.length > 64) {
-      return NextResponse.json(
-        { error: 'Invalid room name' },
-        { status: 400 }
-      );
+    // Create client without conflict
+    const supabase = await createClient();
+    
+    // Get session using proper Supabase method
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
+
+    if (authError || !session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Verify user belongs to this room
+    if (!room.includes(session.user.id)) {
+      return NextResponse.json({ error: 'Not authorized for this room' }, { status: 403 });
+    }
+
+    // Get user profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', session.user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
     // Generate LiveKit token
-    const at = new AccessToken(
-      process.env.LIVEKIT_API_KEY!,
-      process.env.LIVEKIT_API_SECRET!,
-      {
-        identity: user.id,
-        name: user.user_metadata.full_name || user.email || 'Anonymous',
-      }
-    );
+    const apiKey = process.env.LIVEKIT_API_KEY!;
+    const apiSecret = process.env.LIVEKIT_API_SECRET!;
+    const token = new AccessToken(apiKey, apiSecret, {
+      identity: session.user.id,
+      name: profile.full_name || 'User',
+      ttl: 60 * 10, // 10 minutes in seconds
+    });
 
-    at.addGrant({
-      room: roomName,
+    token.addGrant({
+      room,
       roomJoin: true,
       canPublish: true,
       canSubscribe: true,
+      canPublishData: true,
     });
 
-    const token = await at.toJwt();
-
-    return NextResponse.json({ 
-      token, 
-      url: process.env.LIVEKIT_URL 
-    });
+    return NextResponse.json({ token: token.toJwt() });
   } catch (error) {
     console.error('Token generation error:', error);
     return NextResponse.json(
