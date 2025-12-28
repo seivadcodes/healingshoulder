@@ -1,108 +1,171 @@
+// app/connect2/page.tsx
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-interface CallRequest {
-  id: string;
-  name: string;
-  room: string; // Added missing room property
-}
-
-export default function ConnectPage() {
-  const [userId] = useState(() => 
-    localStorage.getItem('userId') || crypto.randomUUID()
-  );
-  const [requester, setRequester] = useState<CallRequest | null>(null);
+export default function Connect2Page() {
+  const [requests, setRequests] = useState<{ id: string; user_id: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const supabase = createClient();
   const router = useRouter();
 
+  // Fetch & subscribe to active requests
   useEffect(() => {
-    localStorage.setItem('userId', userId);
-    
-    const channel = supabase.channel('call-requests')
-      .on('broadcast', { event: 'call_request' }, (payload) => {
-        const callData = payload.payload as CallRequest;
-        if (callData.id !== userId) {
-          setRequester(callData);
+    const fetchRequests = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('support_requests')
+        .select('id, user_id')
+        .eq('status', 'pending');
+
+      if (error) {
+        console.error('Failed to load requests:', error);
+      } else {
+        setRequests(data || []);
+      }
+      setLoading(false);
+    };
+
+    fetchRequests();
+
+    // Realtime subscription
+    const channel = supabase
+      .channel('support_requests')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'support_requests' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setRequests((prev) => [...prev, payload.new as any]);
+          } else if (payload.eventType === 'DELETE' || payload.eventType === 'UPDATE') {
+            setRequests((prev) => prev.filter((r) => r.id !== payload.old.id));
+          }
         }
-      })
-      .on('broadcast', { event: 'call_accepted' }, (payload) => {
-        const { room, requester: reqId, acceptor } = payload.payload;
-        if (reqId === userId || acceptor === userId) {
-          router.push(`/room/${room}`);
-        }
-      })
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId, router]);
+  }, [supabase]);
 
-  const requestCall = async () => {
-    const room = crypto.randomUUID();
-    await supabase.channel('call-requests').send({
-      type: 'broadcast',
-      event: 'call_request',
-      payload: { 
-        id: userId, 
-        name: `User ${userId.slice(0, 4)}`, 
-        room // Include room in payload
-      }
-    });
+  const handleNeedToTalk = async () => {
+    setSubmitting(true);
+
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data?.user) {
+      alert('You must be signed in');
+      setSubmitting(false);
+      return;
+    }
+
+    const user = data.user;
+    const roomId = crypto.randomUUID(); // Full UUID — valid for UUID column
+
+    const { error: insertError } = await supabase
+      .from('support_requests')
+      .insert({
+        id: roomId,
+        user_id: user.id, // ✅ This is the requester — matches your DB column
+        status: 'pending',
+      });
+
+    if (insertError) {
+      console.error('Failed to create request:', insertError);
+      alert('Failed to request support');
+    } else {
+      router.push(`/room/${roomId}`);
+    }
+
+    setSubmitting(false);
   };
 
-  const acceptCall = async () => {
-    if (!requester) return;
-    await supabase.channel('call-requests').send({
-      type: 'broadcast',
-      event: 'call_accepted',
-      payload: {
-        room: requester.room,
-        requester: requester.id,
-        acceptor: userId
-      }
-    });
-    router.push(`/room/${requester.room}`);
-  };
+  const acceptRequest = async (roomId: string) => {
+  const { data: authData, error: authError } = await supabase.auth.getUser();
 
+  if (authError || !authData?.user) {
+    alert('You must be signed in');
+    return;
+  }
+
+  const user = authData.user;
+
+  // Fetch the request to check who the requester is
+  const { data: requestData, error: fetchError } = await supabase
+    .from('support_requests')
+    .select('user_id')
+    .eq('id', roomId)
+    .single();
+
+  if (fetchError) {
+    console.error('Failed to fetch request:', fetchError);
+    alert('Could not load request details');
+    return;
+  }
+
+  // requestData is the row (or null)
+  if (!requestData) {
+    alert('Request not found');
+    return;
+  }
+
+  if (requestData.user_id === user.id) {
+    alert('You cannot accept your own request.');
+    return;
+  }
+
+  const { error: updateError } = await supabase
+    .from('support_requests')
+    .update({ status: 'accepted' })
+    .eq('id', roomId)
+    .eq('status', 'pending');
+
+  if (updateError) {
+    console.error('Failed to accept request:', updateError);
+    alert('Failed to accept request');
+    return;
+  }
+
+  router.push(`/room/${roomId}`);
+};
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50">
-      {!requester ? (
-        <button 
-          onClick={requestCall}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-6 px-12 rounded-2xl text-2xl shadow-lg transition transform hover:scale-105"
-        >
-          I need to talk
-        </button>
-      ) : (
-        <div className="text-center bg-white p-8 rounded-3xl shadow-2xl border-2 border-blue-100 max-w-md mx-4">
-          <div className="mb-6">
-            <div className="inline-block bg-blue-100 text-blue-800 px-4 py-2 rounded-full font-medium">
-              {requester.name} wants to talk
+    <div className="p-6 max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Need to Talk?</h1>
+
+      <button
+        onClick={handleNeedToTalk}
+        disabled={submitting}
+        className="bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white px-6 py-3 rounded-lg font-medium"
+      >
+        {submitting ? 'Creating room...' : 'I need to talk'}
+      </button>
+
+      <div className="mt-8 space-y-4">
+        <h2 className="text-xl font-semibold">Active Requests</h2>
+        {loading ? (
+          <p>Loading...</p>
+        ) : requests.length === 0 ? (
+          <p className="text-gray-500">No one is requesting support right now.</p>
+        ) : (
+          requests.map((req) => (
+            <div key={req.id} className="border p-4 rounded-lg bg-white shadow">
+              <p>A community member needs to talk</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => acceptRequest(req.id)}
+                  className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm"
+                >
+                  Accept
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button 
-              onClick={acceptCall}
-              className="bg-green-500 hover:bg-green-600 text-white text-lg font-medium px-8 py-4 rounded-xl transition transform hover:scale-105"
-            >
-              Accept Call
-            </button>
-            <button 
-              onClick={() => setRequester(null)}
-              className="bg-gray-200 hover:bg-gray-300 text-gray-800 text-lg font-medium px-8 py-4 rounded-xl transition"
-            >
-              Not Now
-            </button>
-          </div>
-        </div>
-      )}
+          ))
+        )}
+      </div>
     </div>
   );
 }
