@@ -28,7 +28,6 @@ export default function CallsPage() {
   const supabase = createClient();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioElementsRef = useRef<HTMLAudioElement[]>([]);
-  const [currentUser, setCurrentUser] = useState<{ id: string; name: string } | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -48,13 +47,6 @@ export default function CallsPage() {
         router.push('/auth');
         return;
       }
-
-      // Set current user for caller name
-      const userProfile = session.user.user_metadata;
-      setCurrentUser({
-        id: session.user.id,
-        name: userProfile?.full_name || 'You',
-      });
 
       const { data, error } = await supabase
         .from('profiles')
@@ -109,6 +101,7 @@ export default function CallsPage() {
         },
       });
 
+      // Handle remote participant disconnect
       newRoom.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         console.log('Participant disconnected:', participant.identity);
         setCallStatus('ended');
@@ -117,10 +110,13 @@ export default function CallsPage() {
         }, 2000);
       });
 
+      // Handle room disconnect (e.g., network loss)
       newRoom.on(RoomEvent.Disconnected, () => {
         setCallStatus('ended');
         setTimeout(() => endCall(), 2000);
       });
+
+      // NOTE: Timer is NOT started here anymore
 
       newRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
         handleTrackSubscribed(track, publication, participant);
@@ -153,6 +149,7 @@ export default function CallsPage() {
 
   const handleTrackSubscribed = (track: any, _publication: any, participant: any) => {
     if (track.kind === Track.Kind.Audio) {
+      // Start timer and update status ONLY when we receive the first remote audio track
       if (callStatus !== 'connected') {
         setCallStatus('connected');
         setCallDuration(0);
@@ -176,7 +173,7 @@ export default function CallsPage() {
   };
 
   const initiateCall = async () => {
-    if (!selectedUser || !currentUser) return;
+    if (!selectedUser) return;
     
     const roomName = `call-${Date.now()}`;
     const { data: { session } } = await supabase.auth.getSession();
@@ -196,7 +193,7 @@ export default function CallsPage() {
         event: 'incoming_call',
         payload: {
           caller_id: session?.user.id,
-          caller_name: currentUser.name,
+          caller_name: session?.user.user_metadata?.full_name || 'Community Member',
           room_name: roomName,
           timestamp: Date.now()
         }
@@ -215,7 +212,7 @@ export default function CallsPage() {
   };
 
   const acceptCall = async () => {
-    if (!incomingCall || !currentUser) return;
+    if (!incomingCall) return;
     
     setActiveCall({
       id: Date.now().toString(),
@@ -423,41 +420,14 @@ export default function CallsPage() {
         
         {selectedUser && (
           <div className="mt-6 bg-white rounded-xl border border-stone-200 p-5">
-            <h2 className="font-medium text-stone-800 mb-3">Confirm Call Participants</h2>
-            
-            {/* Caller and Callee Name Inputs */}
-            <div className="space-y-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">
-                  Caller (You)
-                </label>
-                <input
-                  type="text"
-                  value={currentUser?.name || 'You'}
-                  readOnly
-                  className="w-full px-3 py-2 border border-stone-300 rounded-lg bg-stone-100 text-stone-800 cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">
-                  Callee
-                </label>
-                <input
-                  type="text"
-                  value={selectedUser.full_name}
-                  readOnly
-                  className="w-full px-3 py-2 border border-stone-300 rounded-lg bg-stone-100 text-stone-800 cursor-not-allowed"
-                />
-              </div>
-            </div>
-
+            <h2 className="font-medium text-stone-800 mb-3">Ready to connect?</h2>
             <p className="text-stone-600 mb-4">
               You're about to start an audio call with {selectedUser.full_name}. 
               This creates a private space where you can share your grief journey.
             </p>
             <button
               onClick={initiateCall}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-medium py-3 px-6 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-md hover:shadow-lg"
+              className="w-full bg-amber-500 hover:bg-amber-500 txt-white font-medium py-3 px-6 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-md hover:shadow-lg"
             >
               <Phone size={20} />
               Start Call
