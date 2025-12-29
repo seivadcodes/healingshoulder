@@ -6,24 +6,25 @@ import { useRouter } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase';
 
-// 👇 Add this helper INSIDE the file (not inside the hook)
+// Helper to ensure profile exists and has full_name
 async function ensureProfileExists(user: User) {
   if (!user?.id) return;
 
   const supabase = createClient();
-  
-  // Check if profile exists
+
   const { data: existing, error: fetchError } = await supabase
     .from('profiles')
     .select('id')
     .eq('id', user.id)
     .single();
 
-  // If not found, create it
-  if (fetchError?.code === 'PGRST116') { // Row not found
-    const fullName = user.user_metadata?.full_name 
-      || user.email?.split('@')[0] 
-      || 'Friend';
+  // If profile doesn't exist, create it
+  if (fetchError?.code === 'PGRST116') {
+    // Derive full_name: use user_metadata if available, else fallback
+    const fullName =
+      (user.user_metadata as any)?.full_name ||
+      user.email?.split('@')[0] ||
+      'Friend';
 
     const { error: insertError } = await supabase
       .from('profiles')
@@ -34,7 +35,7 @@ async function ensureProfileExists(user: User) {
         created_at: new Date().toISOString(),
       });
 
-    if (insertError && insertError.code !== '23505') { // ignore duplicates
+    if (insertError && insertError.code !== '23505') {
       console.error('Failed to create profile:', insertError);
     }
   }
@@ -48,25 +49,33 @@ export function useAuth() {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const supabase = createClient();
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    return data;
-  }, []);
-
-  const signUp = useCallback(async (email: string, password: string) => {
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
-      options: {
-        emailRedirectTo: typeof window !== 'undefined' 
-          ? `${window.location.origin}/auth/callback` 
-          : undefined,
-      },
     });
     if (error) throw error;
     return data;
   }, []);
+
+  // 👇 Accept fullName during sign-up
+  const signUp = useCallback(
+    async (email: string, password: string, fullName?: string) => {
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: fullName }, // 👈 stored in auth.users.user_metadata
+          emailRedirectTo: typeof window !== 'undefined'
+            ? `${window.location.origin}/auth/callback`
+            : undefined,
+        },
+      });
+      if (error) throw error;
+      return data;
+    },
+    []
+  );
 
   const signOut = useCallback(async () => {
     const supabase = createClient();
@@ -83,10 +92,12 @@ export function useAuth() {
     const clearStaleSession = () => {
       try {
         if (typeof window !== 'undefined') {
-          Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('supabase.auth.token') || 
-                key.startsWith('supabase.session') || 
-                key.startsWith('sb-')) {
+          Object.keys(localStorage).forEach((key) => {
+            if (
+              key.startsWith('supabase.auth.token') ||
+              key.startsWith('supabase.session') ||
+              key.startsWith('sb-')
+            ) {
               localStorage.removeItem(key);
             }
           });
@@ -96,7 +107,6 @@ export function useAuth() {
       }
     };
 
-    // Initial session check
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
         console.error('Session error:', error);
@@ -108,7 +118,6 @@ export function useAuth() {
       }
 
       if (isSubscribed && session?.user) {
-        // ✅ Ensure profile exists on initial load
         ensureProfileExists(session.user);
         setUser(session.user);
       } else if (isSubscribed) {
@@ -121,45 +130,44 @@ export function useAuth() {
       }
     });
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!isSubscribed) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!isSubscribed) return;
 
-      console.log('Auth state changed:', event);
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          if (isSubscribed) {
+            setLoading(false);
+            setSessionChecked(true);
+          }
+          const currentPath = window.location.pathname;
+          if (
+            !currentPath.startsWith('/auth') &&
+            !currentPath.startsWith('/onboarding')
+          ) {
+            router.push('/auth');
+          }
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (session?.user) {
+            ensureProfileExists(session.user);
+            setUser(session.user);
+          }
+          if (isSubscribed) {
+            setLoading(false);
+            setSessionChecked(true);
+          }
+        } else if (event === 'USER_UPDATED') {
+          if (session?.user) {
+            setUser(session.user);
+          }
+        }
 
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
         if (isSubscribed) {
           setLoading(false);
           setSessionChecked(true);
         }
-        const currentPath = window.location.pathname;
-        if (!currentPath.startsWith('/auth') && !currentPath.startsWith('/onboarding')) {
-          router.push('/auth');
-        }
-      } 
-      else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (session?.user) {
-          // ✅ Ensure profile exists on sign-in
-          ensureProfileExists(session.user);
-          setUser(session.user);
-        }
-        if (isSubscribed) {
-          setLoading(false);
-          setSessionChecked(true);
-        }
-      } 
-      else if (event === 'USER_UPDATED') {
-        if (session?.user) {
-          setUser(session.user);
-        }
       }
-
-      if (isSubscribed) {
-        setLoading(false);
-        setSessionChecked(true);
-      }
-    });
+    );
 
     clearStaleSession();
 
@@ -169,12 +177,12 @@ export function useAuth() {
     };
   }, [router]);
 
-  return { 
-    user, 
-    loading, 
+  return {
+    user,
+    loading,
     sessionChecked,
-    signIn, 
-    signUp, 
-    signOut 
+    signIn,
+    signUp,
+    signOut,
   };
 }

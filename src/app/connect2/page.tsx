@@ -1,416 +1,540 @@
-// app/connect2/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
-import { formatDistanceToNow } from 'date-fns';
-import { X, Loader2 } from 'lucide-react';
+import { createClient } from '@/lib/supabase';
+import { Phone, X, MessageCircle, Clock, User } from 'lucide-react';
 
-type GriefType =
-  | 'parent'
-  | 'child'
-  | 'spouse'
-  | 'sibling'
-  | 'friend'
-  | 'pet'
-  | 'miscarriage'
-  | 'caregiver'
-  | 'suicide'
-  | 'other';
-
-type SupportRequest = {
-  id: string;
-  user_id: string;
-  grief_type: GriefType;
-  description: string | null;
-  created_at: string;
-  requester_name: string;
-};
-
-type Profile = {
-  full_name: string | null;
-};
-
-const griefTypeLabels: Record<GriefType, string> = {
-  parent: 'Loss of a Parent',
-  child: 'Loss of a Child',
-  spouse: 'Grieving a Partner',
-  sibling: 'Loss of a Sibling',
-  friend: 'Loss of a Friend',
-  pet: 'Pet Loss',
-  miscarriage: 'Pregnancy or Infant Loss',
-  caregiver: 'Caregiver Grief',
-  suicide: 'Suicide Loss',
-  other: 'Other Loss',
-};
-
-export default function Connect2Page() {
-  const [requests, setRequests] = useState<SupportRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [selectedGriefType, setSelectedGriefType] = useState<GriefType | ''>('');
-  const [description, setDescription] = useState('');
-  const [acceptingRequest, setAcceptingRequest] = useState<string | null>(null);
-
-  const supabase = createClient();
+export default function ConnectPage() {
+  const [user, setUser] = useState<any>(null);
+  const [activeRequest, setActiveRequest] = useState<any>(null);
+  const [availableRequests, setAvailableRequests] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const supabase = createClient();
+  const [isPostingRequest, setIsPostingRequest] = useState(false);
+  const isRedirectingRef = useRef(false);
+  const requestSubscriptionRef = useRef<any>(null);
 
   useEffect(() => {
-  const fetchRequests = async () => {
-    setLoading(true);
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    let isMounted = true;
+    const initialize = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          router.push('/auth');
+          return;
+        }
 
-    let query = supabase
-      .from('support_requests')
-      .select(`
-        id,
-        user_id,
-        grief_type,
-        description,
-        created_at,
-        requester_profile: profiles!support_requests_user_id_fkey (full_name)
-      `)
-      .eq('status', 'pending');
-
-    if (currentUser) {
-      query = query.neq('user_id', currentUser.id);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Failed to load requests:', error);
-      setRequests([]);
-    } else {
-      const formatted = (data || []).map((req: any) => ({
-        ...req,
-        requester_name: req.requester_profile?.full_name?.trim() || 'Someone',
-      }));
-      setRequests(formatted);
-    }
-    setLoading(false);
-  };
-
-  fetchRequests();
-
-  // Realtime channel
-  const channel = supabase
-    .channel('support_requests')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_requests',
-        filter: 'status=eq.pending',
-      },
-      async (payload) => {
-        // Same as before – add new pending requests (not your own)
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (currentUser && payload.new.user_id === currentUser.id) return;
-
-        const { data: newRequest, error: fetchError } = await supabase
-          .from('support_requests')
-          .select(`
-            id,
-            user_id,
-            grief_type,
-            description,
-            created_at,
-            requester_profile: profiles!support_requests_user_id_fkey (full_name)
-          `)
-          .eq('id', payload.new.id)
+        // Get current user profile
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .eq('id', session.user.id)
           .single();
 
-        if (fetchError || !newRequest) return;
-
-        const profileData = newRequest.requester_profile;
-        let fullName: string | null = null;
-        if (Array.isArray(profileData) && profileData.length > 0) {
-          fullName = profileData[0].full_name;
-        } else if (profileData && typeof profileData === 'object' && 'full_name' in profileData) {
-          fullName = (profileData as Profile).full_name;
-        }
-        const requesterName = fullName?.trim() || 'Someone';
-
-        setRequests((prev) => {
-          if (prev.some(req => req.id === newRequest.id)) return prev;
-          return [{ ...newRequest, requester_name: requesterName }, ...prev];
-        });
-      }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'support_requests',
-        filter: 'status=eq.accepted', // only accepted (not cancelled)
-      },
-      async (payload) => {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-
-        if (!currentUser) return;
-
-        const roomId = payload.new.id;
-        const requesterId = payload.new.user_id;
-        const acceptorId = payload.new.accepted_by;
-
-        // If I'm the requester → redirect me to the room
-        if (currentUser.id === requesterId) {
-          console.log('[Connect2] Your request was accepted! Redirecting to room...');
-          // Small delay helps avoid race conditions
-          setTimeout(() => {
-            router.push(`/room/${roomId}`);
-          }, 300);
+        if (profileError) throw profileError;
+        
+        if (isMounted) {
+          setUser(profile);
         }
 
-        // If I'm the acceptor → already handled in acceptRequest(), but safe to ignore here
-        // If I'm neither → do nothing
+        // Fetch active requests first
+        await fetchActiveRequests(session.user.id);
+        
+        // Then fetch available requests
+        await fetchAvailableRequests(session.user.id);
+
+        // Setup realtime subscription for ALL relevant requests
+        setupRealtimeSubscription(session.user.id);
+      } catch (err) {
+        console.error('Initialization error:', err);
+        if (isMounted) {
+          setError('Failed to load connection requests');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'support_requests',
-        filter: 'status=eq.cancelled',
-      },
-      (payload) => {
-        setRequests((prev) => prev.filter((r) => r.id !== payload.new.id));
+    };
+
+    initialize();
+
+    return () => {
+      isMounted = false;
+      // Cleanup subscriptions
+      if (requestSubscriptionRef.current) {
+        supabase.removeChannel(requestSubscriptionRef.current);
       }
-    )
-    .subscribe();
+    };
+  }, []);
 
-  return () => {
-    supabase.removeChannel(channel);
+  // Setup realtime subscription that handles both available requests and matched status changes
+  const setupRealtimeSubscription = (userId: string) => {
+    if (requestSubscriptionRef.current) {
+      supabase.removeChannel(requestSubscriptionRef.current);
+    }
+
+    const channel = supabase
+      .channel('quick_connect_requests')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'quick_connect_requests'
+        },
+        async (payload) => {
+          // Prevent duplicate processing during redirect
+          if (isRedirectingRef.current) return;
+          
+          try {
+            // Handle matched status for current user's request
+            if (
+              payload.eventType === 'UPDATE' && 
+              payload.new.user_id === userId && 
+              payload.new.status === 'matched' && 
+              payload.new.room_id
+            ) {
+              isRedirectingRef.current = true;
+              router.push(`/room/${payload.new.room_id}`);
+              return;
+            }
+
+            // Refetch data only if still on this page
+            await fetchAvailableRequests(userId);
+            await fetchActiveRequests(userId);
+          } catch (err) {
+            console.error('Realtime update error:', err);
+          }
+        }
+      )
+      .subscribe();
+
+    requestSubscriptionRef.current = channel;
   };
-}, [supabase, router]);
 
-  const handleCreateRequest = async () => {
-    if (!selectedGriefType) {
-      alert('Please select a grief type.');
-      return;
-    }
-
-    setSubmitting(true);
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      alert('You must be signed in');
-      setSubmitting(false);
-      return;
-    }
-
-    const roomId = crypto.randomUUID();
-
-    const { error: insertError } = await supabase
-      .from('support_requests')
-      .insert({
-        id: roomId,
-        user_id: user.id,
-        status: 'pending',
-        grief_type: selectedGriefType,
-        description: description || null,
-      });
-
-    if (insertError) {
-      console.error('Failed to create request:', insertError);
-      alert('Failed to request support');
-    } else {
-      setShowModal(false);
-      setSelectedGriefType('');
-      setDescription('');
-      router.push(`/room/${roomId}`);
-    }
-
-    setSubmitting(false);
-  };
-
-  const acceptRequest = async (roomId: string, requesterUserId: string) => {
-    setAcceptingRequest(roomId);
+  const fetchActiveRequests = async (userId: string) => {
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data, error } = await supabase
+        .from('quick_connect_requests')
+        .select(`
+          id,
+          user_id,
+          status,
+          expires_at,
+          created_at,
+          room_id,
+          requester_profile:profiles!user_id(full_name, avatar_url)
+        `)
+        .eq('user_id', userId)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      if (authError || !user) {
-        alert('You must be signed in');
-        setAcceptingRequest(null);
-        return;
+      if (error) throw error;
+
+      const request = data?.[0];
+      if (request) {
+        // Handle matched status with room redirect
+        if (request.status === 'matched' && request.room_id) {
+          isRedirectingRef.current = true;
+          router.push(`/room/${request.room_id}`);
+          return;
+        }
+        
+        // Only set active request if it's available
+        if (request.status === 'available') {
+          // Format with profile
+          const formattedRequest = {
+            ...request,
+            user: request.requester_profile?.[0] || { full_name: 'Anonymous', avatar_url: null }
+          };
+          setActiveRequest(formattedRequest);
+          return;
+        }
       }
-
-      if (requesterUserId === user.id) {
-        alert('You cannot accept your own request.');
-        setAcceptingRequest(null);
-        return;
-      }
-
-      console.log(`[Connect2] Accepting request ${roomId} for user ${requesterUserId}`);
       
-      // First, update the request status
-      const { error: updateError } = await supabase
-        .from('support_requests')
-        .update({ 
-          status: 'accepted',
-          accepted_by: user.id
-        })
-        .eq('id', roomId)
-        .eq('status', 'pending');
-
-      if (updateError) {
-        console.error('Failed to accept request:', updateError);
-        alert('Failed to accept request. Please try again.');
-        setAcceptingRequest(null);
-        return;
-      }
-
-      console.log(`[Connect2] Successfully accepted request ${roomId}, redirecting to room`);
-      
-      // Add a small delay to ensure the database update propagates
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      router.push(`/room/${roomId}`);
-    } catch (error) {
-      console.error('Error accepting request:', error);
-      alert('An error occurred while accepting the request');
-      setAcceptingRequest(null);
+      setActiveRequest(null);
+    } catch (err) {
+      console.error('Error fetching active requests:', err);
+      throw err;
     }
   };
+
+  const fetchAvailableRequests = async (currentUserId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('quick_connect_requests')
+        .select(`
+          id,
+          created_at,
+          user_id,
+          requester_profile:profiles!user_id(
+            full_name,
+            avatar_url
+          )
+        `)
+        .eq('status', 'available')
+        .neq('user_id', currentUserId)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      
+      const formattedRequests = (data || []).map(req => ({
+        ...req,
+        // Use explicitly named join to avoid PGREST201 error
+        user: req.requester_profile?.[0] || {
+          full_name: 'Anonymous',
+          avatar_url: null
+        }
+      }));
+      
+      setAvailableRequests(formattedRequests);
+    } catch (err) {
+      console.error('Error fetching available requests:', err);
+      throw err;
+    }
+  };
+
+  const postRequest = async () => {
+    if (!user || activeRequest || isPostingRequest || isRedirectingRef.current) return;
+    
+    setIsPostingRequest(true);
+    setError(null);
+    
+    try {
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      
+      const { error } = await supabase
+        .from('quick_connect_requests')
+        .insert({
+          user_id: user.id,
+          status: 'available',
+          expires_at: expiresAt
+        });
+
+      if (error) throw error;
+      
+      // Optimistically update UI
+      setActiveRequest({
+        id: Date.now().toString(),
+        user_id: user.id,
+        status: 'available',
+        created_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        user: {
+          full_name: user.full_name,
+          avatar_url: user.avatar_url
+        }
+      });
+      
+      // Refresh the subscription to include this new request
+      setupRealtimeSubscription(user.id);
+    } catch (err) {
+      console.error('Failed to post request:', err);
+      setError('Failed to create connection request. Please try again.');
+    } finally {
+      setIsPostingRequest(false);
+    }
+  };
+
+  const acceptRequest = async (requestId: string) => {
+    if (!user || isRedirectingRef.current) return;
+  
+    try {
+      // Generate unique room ID
+      const roomId = `quick-connect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      
+      // First, verify the request exists and is available
+      const { data: existingRequest, error: verifyError } = await supabase
+        .from('quick_connect_requests')
+        .select('*')
+        .eq('id', requestId)
+        .eq('status', 'available')
+        .gt('expires_at', new Date().toISOString())
+        .single();
+      
+      if (verifyError) {
+        throw new Error(`Request verification failed: ${verifyError.message}`);
+      }
+      
+      if (!existingRequest) {
+        throw new Error('Request not found or no longer available');
+      }
+      
+      // Update the request to matched status with room ID and acceptor ID
+      // ONLY using columns that exist in your schema:
+      // id, user_id, status, expires_at, created_at, room_id, acceptor_id
+      const { error } = await supabase
+        .from('quick_connect_requests')
+        .update({
+          status: 'matched',
+          room_id: roomId,
+          acceptor_id: user.id // 👈 Record who accepted the request
+        })
+        .eq('id', requestId)
+        .eq('status', 'available');
+      
+      if (error) {
+        console.error('Supabase update error:', error);
+        throw new Error(`Supabase update failed: ${error.message}`);
+      }
+      
+      console.log('Request successfully updated, redirecting to room:', roomId);
+      
+      // Redirect to room immediately
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+      
+    } catch (err) {
+      console.error('Failed to accept request:', err);
+      setError('Failed to accept request. Please try again.');
+    }
+    
+    // 🚀 SCALABILITY NOTE:
+    // For future multi-participant rooms or group calls, consider:
+    // 1. Creating a dedicated `room_participants` table with:
+    //    - room_id (text)
+    //    - user_id (uuid)
+    //    - role (text: 'host', 'participant')
+    //    - joined_at (timestamptz)
+    // 2. Using a separate `rooms` table to manage room metadata
+    // 3. Implementing WebRTC signaling server for efficient peer connections
+    // This current implementation assumes 1:1 connections only.
+  };
+
+  const cancelRequest = async () => {
+    if (!activeRequest || isRedirectingRef.current) return;
+    
+    try {
+      const { error } = await supabase
+        .from('quick_connect_requests')
+        .update({ status: 'completed' })
+        .eq('id', activeRequest.id);
+
+      if (error) throw error;
+      
+      setActiveRequest(null);
+    } catch (err) {
+      console.error('Failed to cancel request:', err);
+      setError('Failed to cancel request. Please try again.');
+    }
+  };
+
+  const timeAgo = (timestamp: string) => {
+    const now = new Date();
+    const posted = new Date(timestamp);
+    const diff = Math.floor((now.getTime() - posted.getTime()) / 1000);
+    
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-amber-50 to-stone-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto mb-4"></div>
+          <p className="text-stone-600">Finding connections...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Need to Talk?</h1>
-
-      <button
-        onClick={() => setShowModal(true)}
-        className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-medium"
-      >
-        I need to talk
-      </button>
-
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-md">
-            <div className="flex justify-between items-center p-5 border-b border-stone-200">
-              <h2 className="text-xl font-semibold text-stone-800">What are you grieving?</h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-stone-500 hover:text-stone-700"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Grief type
-                </label>
-                <select
-                  value={selectedGriefType}
-                  onChange={(e) => setSelectedGriefType(e.target.value as GriefType)}
-                  className="w-full p-2.5 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                >
-                  <option value="">Select your experience</option>
-                  {(Object.keys(griefTypeLabels) as GriefType[]).map((type) => (
-                    <option key={type} value={type}>
-                      {griefTypeLabels[type]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Anything you'd like to share? (optional)
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="I'm looking for someone who understands..."
-                  className="w-full min-h-[80px] rounded-md border border-stone-300 px-3 py-2 text-sm placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2 border-t border-stone-200">
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-stone-700 hover:bg-stone-100 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateRequest}
-                  disabled={!selectedGriefType || submitting}
-                  className="bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    'Create Request'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
+    <div className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-100 p-4">
+      {error && (
+        <div className="fixed top-4 right-4 max-w-sm p-4 bg-red-100 text-red-700 rounded-lg shadow-lg z-50">
+          {error}
         </div>
       )}
 
-      <div className="mt-8 space-y-4">
-        <h2 className="text-xl font-semibold">Active Requests</h2>
-        {loading ? (
-          <div className="flex justify-center items-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-amber-500" />
+      <div className="max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-stone-800">Connect Now</h1>
+            <p className="text-stone-600 mt-2">
+              Post a request when you need to talk, or accept someone else&apos;s request to connect immediately.
+            </p>
           </div>
-        ) : requests.length === 0 ? (
-          <p className="text-gray-500 py-8 text-center">No one is requesting support right now.</p>
-        ) : (
-          requests.map((req) => (
-            <div key={req.id} className="border p-4 rounded-lg bg-white shadow hover:shadow-md transition-shadow">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="inline-block bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded capitalize">
-                    {griefTypeLabels[req.grief_type] || req.grief_type}
-                  </span>
-                  <p className="mt-2">
-                    <span className="font-medium text-amber-700">{req.requester_name}</span> is looking for someone who understands
-                  </p>
-                  {req.description && (
-                    <p className="mt-2 text-stone-700 italic pl-1 border-l-2 border-amber-200">"{req.description}"</p>
-                  )}
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="text-stone-600 hover:text-stone-900"
+          >
+            <X size={28} />
+          </button>
+        </div>
+
+        {/* Active Request Section */}
+        {activeRequest ? (
+          <div className="bg-amber-50 rounded-xl border border-amber-200 p-6 mb-8 animate-fade-in">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center border-2 border-amber-300 flex-shrink-0">
+                    {user.avatar_url ? (
+                      <img 
+                        src={user.avatar_url} 
+                        alt={user.full_name} 
+                        className="w-full h-full rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-amber-800 font-bold text-lg">
+                        {user.full_name?.charAt(0) || <User size={20} />}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="font-bold text-stone-800">Your request is active</h2>
+                    <p className="text-stone-600">Waiting for someone to connect with you</p>
+                  </div>
                 </div>
-                <span className="text-xs text-stone-500 whitespace-nowrap">
-                  {formatDistanceToNow(new Date(req.created_at))} ago
-                </span>
+                
+                <div className="flex items-center gap-2 text-amber-700 bg-amber-100 rounded-full px-3 py-1 w-fit mt-2">
+                  <Clock size={16} />
+                  <span className="text-sm font-medium">
+                    Expires in {Math.ceil((new Date(activeRequest.expires_at).getTime() - Date.now()) / 60000)} minutes
+                  </span>
+                </div>
               </div>
-              <div className="mt-4 flex justify-end">
-                <button
-                  onClick={() => acceptRequest(req.id, req.user_id)}
-                  disabled={acceptingRequest === req.id}
-                  className={`${
-                    acceptingRequest === req.id 
-                      ? 'bg-amber-300 cursor-not-allowed' 
-                      : 'bg-amber-500 hover:bg-amber-600'
-                  } text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2`}
-                >
-                  {acceptingRequest === req.id ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Accepting...
-                    </>
-                  ) : (
-                    'Accept Request'
-                  )}
-                </button>
-              </div>
+              
+              <button
+                onClick={cancelRequest}
+                className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-full font-medium transition-colors"
+              >
+                Cancel Request
+              </button>
             </div>
-          ))
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-stone-200 p-8 mb-8 text-center animate-fade-in">
+            <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center border-2 border-amber-300 mx-auto mb-6">
+              <MessageCircle className="text-amber-600" size={32} />
+            </div>
+            <h2 className="text-2xl font-bold text-stone-800 mb-3">I need to talk</h2>
+            <p className="text-stone-600 mb-6 max-w-md mx-auto">
+              Post a request to connect with someone from the community who&apos;s available to listen right now. Your request will be visible to others for 10 minutes.
+            </p>
+            <button
+              onClick={postRequest}
+              disabled={isPostingRequest || isRedirectingRef.current}
+              className={`${
+                isPostingRequest || isRedirectingRef.current
+                  ? 'bg-amber-300 cursor-not-allowed' 
+                  : 'bg-amber-500 hover:bg-amber-600'
+              } text-white font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 mx-auto transition-colors shadow-md`}
+            >
+              {isPostingRequest ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                  Creating request...
+                </>
+              ) : (
+                <>
+                  <Phone size={20} />
+                  Post Request
+                </>
+              )}
+            </button>
+          </div>
         )}
+
+        {/* Available Requests Section */}
+        <div className="bg-white rounded-xl border border-stone-200 overflow-hidden mb-8 animate-fade-in">
+          <div className="p-5 border-b border-stone-100 bg-stone-50">
+            <h2 className="text-xl font-bold text-stone-800">Available Connections</h2>
+            <p className="text-stone-600 mt-1">
+              {availableRequests.length > 0 
+                ? 'Someone in the community needs to talk right now' 
+                : 'No active requests at the moment. Check back later or post your own request.'}
+            </p>
+          </div>
+          
+          {availableRequests.length > 0 ? (
+            <div className="divide-y divide-stone-100">
+              {availableRequests.map((request) => (
+                <div 
+                  key={request.id} 
+                  className="p-5 hover:bg-amber-50 transition-colors cursor-pointer group"
+                  onClick={() => !isRedirectingRef.current && acceptRequest(request.id)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 rounded-full bg-amber-100 flex-shrink-0 flex items-center justify-center border border-amber-200 overflow-hidden mt-1">
+                        {request.user.avatar_url ? (
+                          <img 
+                            src={request.user.avatar_url} 
+                            alt={request.user.full_name} 
+                            className="w-full h-full object-cover rounded-full"
+                          />
+                        ) : (
+                          <span className="text-amber-800 font-medium">
+                            {request.user.full_name?.charAt(0) || <User size={20} />}
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-stone-800">{request.user.full_name}</h3>
+                        <p className="text-stone-600 text-sm mt-0.5">Needs to talk • {timeAgo(request.created_at)}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center">
+                      <div className="bg-amber-100 text-amber-800 rounded-full px-3 py-1 text-sm font-medium hidden group-hover:block">
+                        Accept Request
+                      </div>
+                      <Phone className="text-amber-500 ml-3 group-hover:scale-110 transition-transform" size={24} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-12 text-center text-stone-500">
+              <div className="flex justify-center mb-4">
+                <div className="w-12 h-12 rounded-full bg-stone-100 flex items-center justify-center">
+                  <MessageCircle className="text-stone-400" size={24} />
+                </div>
+              </div>
+              <p>No one is requesting a connection right now</p>
+            </div>
+          )}
+        </div>
+
+        {/* How it Works Section */}
+        <div className="bg-white rounded-xl border border-stone-200 p-6 animate-fade-in">
+          <h2 className="text-xl font-bold text-stone-800 mb-4">How It Works</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center p-4">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
+                <Phone className="text-amber-600" size={24} />
+              </div>
+              <h3 className="font-medium text-stone-800">Post Request</h3>
+              <p className="text-stone-600 mt-1 text-sm">Click &quot;I need to talk&quot; to let others know you&apos;re available</p>
+            </div>
+            
+            <div className="text-center p-4 border-l border-stone-200 md:border-l-0 md:border-t md:border-stone-200">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
+                <User className="text-amber-600" size={24} />
+              </div>
+              <h3 className="font-medium text-stone-800">Get Matched</h3>
+              <p className="text-stone-600 mt-1 text-sm">When someone accepts your request, you&apos;ll both be connected instantly</p>
+            </div>
+            
+            <div className="text-center p-4 border-l border-stone-200 md:border-l-0">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
+                <Clock className="text-amber-600" size={24} />
+              </div>
+              <h3 className="font-medium text-stone-800">10 Minute Window</h3>
+              <p className="text-stone-600 mt-1 text-sm">Requests automatically expire after 10 minutes to keep connections fresh</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

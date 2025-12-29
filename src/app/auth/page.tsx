@@ -12,6 +12,7 @@ export default function AuthPage() {
   const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState(''); // 👈 added
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -31,9 +32,10 @@ export default function AuthPage() {
       if (authMode === 'sign-in') {
         await signIn(email, password);
       } else {
-        await signUp(email, password);
-        // After sign-up, user may need to confirm email
-        // But their profile is already created → will appear in call dropdown
+        if (!fullName.trim()) {
+          throw new Error('Please enter your name.');
+        }
+        await signUp(email, password, fullName.trim());
       }
     } catch (err: any) {
       setError(err.message || 'Authentication failed. Please try again.');
@@ -59,19 +61,40 @@ export default function AuthPage() {
       </h1>
 
       {error && (
-        <div style={{ 
-          color: 'red', 
-          marginBottom: '1rem', 
-          padding: '0.5rem', 
-          backgroundColor: '#ffebee', 
-          borderRadius: '4px',
-          fontSize: '0.9rem'
-        }}>
+        <div
+          style={{
+            color: 'red',
+            marginBottom: '1rem',
+            padding: '0.5rem',
+            backgroundColor: '#ffebee',
+            borderRadius: '4px',
+            fontSize: '0.9rem',
+          }}
+        >
           {error}
         </div>
       )}
 
       <form onSubmit={handleSubmit}>
+        {authMode === 'sign-up' && (
+          <div style={{ marginBottom: '1rem' }}>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Full Name"
+              required
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                borderRadius: '6px',
+                border: '1px solid #ddd',
+                fontSize: '1rem',
+              }}
+            />
+          </div>
+        )}
+
         <div style={{ marginBottom: '1rem' }}>
           <input
             type="email"
@@ -79,12 +102,12 @@ export default function AuthPage() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email"
             required
-            style={{ 
-              width: '100%', 
-              padding: '0.75rem', 
-              borderRadius: '6px', 
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              borderRadius: '6px',
               border: '1px solid #ddd',
-              fontSize: '1rem'
+              fontSize: '1rem',
             }}
           />
         </div>
@@ -96,12 +119,12 @@ export default function AuthPage() {
             placeholder="Password (6+ characters)"
             required
             minLength={6}
-            style={{ 
-              width: '100%', 
-              padding: '0.75rem', 
-              borderRadius: '6px', 
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              borderRadius: '6px',
               border: '1px solid #ddd',
-              fontSize: '1rem'
+              fontSize: '1rem',
             }}
           />
         </div>
@@ -119,16 +142,22 @@ export default function AuthPage() {
             opacity: submitting ? 0.9 : 1,
             fontSize: '1rem',
             fontWeight: '600',
-            transition: 'background-color 0.2s'
+            transition: 'background-color 0.2s',
           }}
         >
-          {submitting ? 'Processing...' : authMode === 'sign-in' ? 'Sign In' : 'Create Account'}
+          {submitting
+            ? 'Processing...'
+            : authMode === 'sign-in'
+              ? 'Sign In'
+              : 'Create Account'}
         </button>
       </form>
 
       <button
         type="button"
-        onClick={() => setAuthMode(authMode === 'sign-in' ? 'sign-up' : 'sign-in')}
+        onClick={() =>
+          setAuthMode(authMode === 'sign-in' ? 'sign-up' : 'sign-in')
+        }
         style={{
           marginTop: '1.25rem',
           background: 'none',
@@ -139,9 +168,9 @@ export default function AuthPage() {
           fontWeight: '500',
         }}
       >
-        {authMode === 'sign-in' 
-          ? "Don't have an account? Sign up" 
-          : "Already have an account? Sign in"}
+        {authMode === 'sign-in'
+          ? "Don't have an account? Sign up"
+          : 'Already have an account? Sign in'}
       </button>
     </div>
   );
