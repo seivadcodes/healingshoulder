@@ -4,130 +4,151 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { Loader2 } from 'lucide-react';
 
 export default function RoomPage() {
-  const params = useParams();
-  const roomId = params?.id as string;
+  const { id: roomId } = useParams<{ id: string }>();
   const router = useRouter();
   const supabase = createClient();
-
+  const [roomInfo, setRoomInfo] = useState<{
+    requester: string;
+    acceptor: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [roomData, setRoomData] = useState<{
-    user_id: string;
-    status: string;
-    grief_type: string;
-  } | null>(null);
-  const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null);
-  const [userRole, setUserRole] = useState<'requester' | 'responder' | null>(null);
+
+  // Helper to safely extract full_name from profile data (handles array or object)
+  const getFullName = (profileData: any): string => {
+    if (!profileData) return '';
+    if (Array.isArray(profileData)) {
+      return profileData.length > 0 ? profileData[0]?.full_name || '' : '';
+    }
+    return profileData.full_name || '';
+  };
 
   useEffect(() => {
-    const initRoom = async () => {
-      if (!roomId) {
-        setError('Invalid room ID');
+    const fetchRoomInfo = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/login');
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('support_requests')
+          .select(`
+            user_id,
+            accepted_by,
+            requester_profile: profiles!support_requests_user_id_fkey (full_name),
+            acceptor_profile: profiles!support_requests_accepted_by_fkey (full_name)
+          `)
+          .eq('id', roomId)
+          .single();
+
+        if (error) throw error;
+
+        // If not yet accepted, show waiting message
+        if (!data.accepted_by) {
+          setError('This room is not ready yet. Please wait for your support partner.');
+          return;
+        }
+
+        const requesterName = getFullName(data.requester_profile).trim() || 'Requester';
+        const acceptorName = getFullName(data.acceptor_profile).trim() || 'Supporter';
+
+        setRoomInfo({
+          requester: requesterName,
+          acceptor: acceptorName,
+        });
+      } catch (err) {
+        console.error('Room error:', err);
+        setError('Failed to load room. Please try again later.');
+      } finally {
         setLoading(false);
-        return;
       }
-
-      // Get current user
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError || !authData?.user) {
-        setError('You must be signed in to join a room');
-        setLoading(false);
-        return;
-      }
-
-      const user = authData.user;
-      setCurrentUser({ id: user.id });
-
-      // Fetch room data
-      const { data: room, error: roomError } = await supabase
-        .from('support_requests')
-        .select('user_id, status, grief_type')
-        .eq('id', roomId)
-        .single();
-
-      if (roomError || !room) {
-        setError('Room not found or no longer available');
-        setLoading(false);
-        return;
-      }
-
-      // Determine role
-      const role = room.user_id === user.id ? 'requester' : 'responder';
-
-      // Optional: prevent responder from joining if not accepted
-      if (room.status !== 'accepted' && role === 'responder') {
-        setError('This support session has not been accepted yet');
-        setLoading(false);
-        return;
-      }
-
-      setRoomData(room);
-      setUserRole(role);
-      setLoading(false);
     };
 
-    initRoom();
-  }, [roomId, supabase]);
+    fetchRoomInfo();
+
+    // Realtime listener for room cancellation
+    const channel = supabase
+      .channel(`room-${roomId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'support_requests',
+          filter: `id=eq.${roomId}`
+        },
+        (payload) => {
+          if (payload.new.status === 'cancelled') {
+            router.push('/connect2');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId, router, supabase]);
 
   if (loading) {
     return (
-      <div className="p-6 max-w-2xl mx-auto">
-        <p>Loading room...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-6 max-w-2xl mx-auto">
-        <div className="text-red-600 bg-red-50 p-4 rounded-lg">
-          {error}
+      <div className="p-6 max-w-md mx-auto text-center">
+        <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+          <h2 className="text-lg font-bold text-red-800 mb-2">Room Error</h2>
+          <p className="text-red-700">{error}</p>
+          <button
+            onClick={() => router.push('/connect2')}
+            className="mt-4 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg"
+          >
+            Back to Requests
+          </button>
         </div>
-        <button
-          onClick={() => router.push('/connect2')}
-          className="mt-4 text-blue-600 hover:underline"
-        >
-          ← Back to support requests
-        </button>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Support Room</h1>
-        <p className="text-gray-600">
-          Grief type: <span className="font-medium">{roomData?.grief_type}</span>
-        </p>
-        <p className="mt-2">
-          {userRole === 'requester' ? (
-            <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-sm">
-              You asked for help
-            </span>
-          ) : (
-            <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
-              You’re offering support
-            </span>
-          )}
-        </p>
-      </div>
+    <div className="p-6 max-w-md mx-auto">
+      <div className="text-center bg-amber-50/50 border border-amber-200 rounded-xl p-6">
+        <h1 className="text-2xl font-bold text-amber-800 mb-4">Support Room</h1>
 
-      <div className="border rounded-lg p-6 bg-gray-50 min-h-[400px]">
-        <div className="flex flex-col items-center justify-center h-full text-gray-500">
-          <p className="text-lg">Real-time support coming soon...</p>
-          <p className="mt-2 text-sm">This room will soon include live chat or video.</p>
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-lg shadow">
+            <p className="text-sm text-stone-500">Requester</p>
+            <p className="font-medium">{roomInfo?.requester}</p>
+          </div>
+
+          <div className="bg-white p-4 rounded-lg shadow">
+            <p className="text-sm text-stone-500">Supporter</p>
+            <p className="font-medium">{roomInfo?.acceptor}</p>
+          </div>
         </div>
-      </div>
 
-      <div className="mt-6 flex gap-3">
+        <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
+          <p className="text-green-800 font-medium">✅ You're both here!</p>
+          <p className="text-green-700 text-sm mt-1">
+            Testing room connection...
+          </p>
+        </div>
+
         <button
           onClick={() => router.push('/connect2')}
-          className="text-gray-700 hover:text-gray-900"
+          className="mt-6 text-stone-600 hover:text-stone-800 underline"
         >
-          ← Back
+          Leave room
         </button>
       </div>
     </div>

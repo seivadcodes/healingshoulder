@@ -7,7 +7,6 @@ import { createClient } from '@/lib/supabase/client';
 import { formatDistanceToNow } from 'date-fns';
 import { X, Loader2 } from 'lucide-react';
 
-// Match the exact GriefType from /connect
 type GriefType =
   | 'parent'
   | 'child'
@@ -26,7 +25,11 @@ type SupportRequest = {
   grief_type: GriefType;
   description: string | null;
   created_at: string;
-  requester_name: string | null;
+  requester_name: string;
+};
+
+type Profile = {
+  full_name: string | null;
 };
 
 const griefTypeLabels: Record<GriefType, string> = {
@@ -49,103 +52,143 @@ export default function Connect2Page() {
   const [showModal, setShowModal] = useState(false);
   const [selectedGriefType, setSelectedGriefType] = useState<GriefType | ''>('');
   const [description, setDescription] = useState('');
+  const [acceptingRequest, setAcceptingRequest] = useState<string | null>(null);
 
   const supabase = createClient();
   const router = useRouter();
 
-  // Helper to get first name or fallback
-  const getFirstName = (fullName: string | null) => {
-    if (!fullName || fullName.trim() === '') return 'Someone';
-    return fullName.split(' ')[0].trim() || 'Someone';
+  useEffect(() => {
+  const fetchRequests = async () => {
+    setLoading(true);
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+
+    let query = supabase
+      .from('support_requests')
+      .select(`
+        id,
+        user_id,
+        grief_type,
+        description,
+        created_at,
+        requester_profile: profiles!support_requests_user_id_fkey (full_name)
+      `)
+      .eq('status', 'pending');
+
+    if (currentUser) {
+      query = query.neq('user_id', currentUser.id);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Failed to load requests:', error);
+      setRequests([]);
+    } else {
+      const formatted = (data || []).map((req: any) => ({
+        ...req,
+        requester_name: req.requester_profile?.full_name?.trim() || 'Someone',
+      }));
+      setRequests(formatted);
+    }
+    setLoading(false);
   };
 
-  useEffect(() => {
-    const fetchRequests = async () => {
-      setLoading(true);
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
+  fetchRequests();
 
-      let query = supabase
-        .from('support_requests')
-        .select(`
-          id,
-          user_at: user_id,
-          grief_type,
-          description,
-          created_at,
-          profiles!inner (full_name)
-        `)
-        .eq('status', 'pending');
+  // Realtime channel
+  const channel = supabase
+    .channel('support_requests')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'support_requests',
+        filter: 'status=eq.pending',
+      },
+      async (payload) => {
+        // Same as before – add new pending requests (not your own)
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser && payload.new.user_id === currentUser.id) return;
 
-      // Exclude own requests if logged in
-      if (currentUser) {
-        query = query.neq('user_id', currentUser.id);
-      }
+        const { data: newRequest, error: fetchError } = await supabase
+          .from('support_requests')
+          .select(`
+            id,
+            user_id,
+            grief_type,
+            description,
+            created_at,
+            requester_profile: profiles!support_requests_user_id_fkey (full_name)
+          `)
+          .eq('id', payload.new.id)
+          .single();
 
-      const { data, error } = await query;
+        if (fetchError || !newRequest) return;
 
-      if (error) {
-        console.error('Failed to load requests:', error);
-        setRequests([]);
-      } else {
-        const formatted = (data || []).map((req: any) => ({
-          ...req,
-          requester_name: req.profiles?.[0]?.full_name || null,
-        }));
-        setRequests(formatted);
-      }
-      setLoading(false);
-    };
-
-    fetchRequests();
-
-    // Realtime subscription
-    const channel = supabase
-      .channel('support_requests')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'support_requests' },
-        async (payload) => {
-          const { data: newRequest, error: fetchError } = await supabase
-            .from('support_requests')
-            .select(`
-              id,
-              user_id,
-              grief_type,
-              description,
-              created_at,
-              profiles!inner (full_name)
-            `)
-            .eq('id', payload.new.id)
-            .single();
-
-          if (fetchError || !newRequest) return;
-
-          // Don't show own requests
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
-          if (currentUser && newRequest.user_id === currentUser.id) return;
-
-          setRequests((prev) => [
-            {
-              ...newRequest,
-              requester_name: newRequest.profiles?.[0]?.full_name || null,
-            },
-            ...prev,
-          ]);
+        const profileData = newRequest.requester_profile;
+        let fullName: string | null = null;
+        if (Array.isArray(profileData) && profileData.length > 0) {
+          fullName = profileData[0].full_name;
+        } else if (profileData && typeof profileData === 'object' && 'full_name' in profileData) {
+          fullName = (profileData as Profile).full_name;
         }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'support_requests' },
-        (payload) => {
-          setRequests((prev) => prev.filter((r) => r.id !== payload.old.id));
-        }
-      )
-      .subscribe();
+        const requesterName = fullName?.trim() || 'Someone';
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase]);
+        setRequests((prev) => {
+          if (prev.some(req => req.id === newRequest.id)) return prev;
+          return [{ ...newRequest, requester_name: requesterName }, ...prev];
+        });
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'support_requests',
+        filter: 'status=eq.accepted', // only accepted (not cancelled)
+      },
+      async (payload) => {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+
+        if (!currentUser) return;
+
+        const roomId = payload.new.id;
+        const requesterId = payload.new.user_id;
+        const acceptorId = payload.new.accepted_by;
+
+        // If I'm the requester → redirect me to the room
+        if (currentUser.id === requesterId) {
+          console.log('[Connect2] Your request was accepted! Redirecting to room...');
+          // Small delay helps avoid race conditions
+          setTimeout(() => {
+            router.push(`/room/${roomId}`);
+          }, 300);
+        }
+
+        // If I'm the acceptor → already handled in acceptRequest(), but safe to ignore here
+        // If I'm neither → do nothing
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'support_requests',
+        filter: 'status=eq.cancelled',
+      },
+      (payload) => {
+        setRequests((prev) => prev.filter((r) => r.id !== payload.new.id));
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [supabase, router]);
 
   const handleCreateRequest = async () => {
     if (!selectedGriefType) {
@@ -188,30 +231,52 @@ export default function Connect2Page() {
   };
 
   const acceptRequest = async (roomId: string, requesterUserId: string) => {
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    setAcceptingRequest(roomId);
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (authError || !user) {
-      alert('You must be signed in');
-      return;
+      if (authError || !user) {
+        alert('You must be signed in');
+        setAcceptingRequest(null);
+        return;
+      }
+
+      if (requesterUserId === user.id) {
+        alert('You cannot accept your own request.');
+        setAcceptingRequest(null);
+        return;
+      }
+
+      console.log(`[Connect2] Accepting request ${roomId} for user ${requesterUserId}`);
+      
+      // First, update the request status
+      const { error: updateError } = await supabase
+        .from('support_requests')
+        .update({ 
+          status: 'accepted',
+          accepted_by: user.id
+        })
+        .eq('id', roomId)
+        .eq('status', 'pending');
+
+      if (updateError) {
+        console.error('Failed to accept request:', updateError);
+        alert('Failed to accept request. Please try again.');
+        setAcceptingRequest(null);
+        return;
+      }
+
+      console.log(`[Connect2] Successfully accepted request ${roomId}, redirecting to room`);
+      
+      // Add a small delay to ensure the database update propagates
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      router.push(`/room/${roomId}`);
+    } catch (error) {
+      console.error('Error accepting request:', error);
+      alert('An error occurred while accepting the request');
+      setAcceptingRequest(null);
     }
-
-    if (requesterUserId === user.id) {
-      alert('You cannot accept your own request.');
-      return;
-    }
-
-    const { error: updateError } = await supabase
-      .from('support_requests')
-      .update({ status: 'accepted' })
-      .eq('id', roomId)
-      .eq('status', 'pending');
-
-    if (updateError) {
-      alert('Failed to accept request');
-      return;
-    }
-
-    router.push(`/room/${roomId}`);
   };
 
   return (
@@ -259,7 +324,7 @@ export default function Connect2Page() {
 
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-2">
-                  Anything you’d like to share? (optional)
+                  Anything you'd like to share? (optional)
                 </label>
                 <textarea
                   value={description}
@@ -299,34 +364,48 @@ export default function Connect2Page() {
       <div className="mt-8 space-y-4">
         <h2 className="text-xl font-semibold">Active Requests</h2>
         {loading ? (
-          <p>Loading...</p>
+          <div className="flex justify-center items-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-amber-500" />
+          </div>
         ) : requests.length === 0 ? (
-          <p className="text-gray-500">No one is requesting support right now.</p>
+          <p className="text-gray-500 py-8 text-center">No one is requesting support right now.</p>
         ) : (
           requests.map((req) => (
-            <div key={req.id} className="border p-4 rounded-lg bg-white shadow">
+            <div key={req.id} className="border p-4 rounded-lg bg-white shadow hover:shadow-md transition-shadow">
               <div className="flex justify-between items-start">
                 <div>
-                  <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded capitalize">
+                  <span className="inline-block bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded capitalize">
                     {griefTypeLabels[req.grief_type] || req.grief_type}
                   </span>
                   <p className="mt-2">
-                    <span className="font-medium">{getFirstName(req.requester_name)}</span> needs to talk
+                    <span className="font-medium text-amber-700">{req.requester_name}</span> is looking for someone who understands
                   </p>
                   {req.description && (
-                    <p className="mt-2 text-gray-700 italic">“{req.description}”</p>
+                    <p className="mt-2 text-stone-700 italic pl-1 border-l-2 border-amber-200">"{req.description}"</p>
                   )}
                 </div>
-                <span className="text-xs text-gray-500 whitespace-nowrap">
+                <span className="text-xs text-stone-500 whitespace-nowrap">
                   {formatDistanceToNow(new Date(req.created_at))} ago
                 </span>
               </div>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-4 flex justify-end">
                 <button
-                  onClick={() => acceptRequest(req.id, req.user_id)} // ✅ pass user_id
-                  className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm"
+                  onClick={() => acceptRequest(req.id, req.user_id)}
+                  disabled={acceptingRequest === req.id}
+                  className={`${
+                    acceptingRequest === req.id 
+                      ? 'bg-amber-300 cursor-not-allowed' 
+                      : 'bg-amber-500 hover:bg-amber-600'
+                  } text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2`}
                 >
-                  Accept
+                  {acceptingRequest === req.id ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Accepting...
+                    </>
+                  ) : (
+                    'Accept Request'
+                  )}
                 </button>
               </div>
             </div>
