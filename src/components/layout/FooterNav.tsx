@@ -35,6 +35,9 @@ const typeColorMap: Record<ResourceType, { bg: string; text: string }> = {
   Book: { bg: '#fce7f3', text: '#be185d' },
 };
 
+// Fallback style in case an invalid type is passed
+const fallbackBadgeStyle = { bg: '#f3f4f6', text: '#4b5563' };
+
 export default function ResourceCard({
   id,
   title,
@@ -46,7 +49,9 @@ export default function ResourceCard({
   communitySource,
   sharedAgo,
 }: ResourceCardProps) {
-  // Base card style
+  // Use fallback if type is invalid
+  const badgeStyle = typeColorMap[type] || fallbackBadgeStyle;
+
   const baseCardStyle: React.CSSProperties = {
     backgroundColor: 'white',
     padding: 0,
@@ -57,12 +62,9 @@ export default function ResourceCard({
     position: 'relative',
   };
 
-  // Featured: add left accent border
   const cardStyle: React.CSSProperties = featured
     ? { ...baseCardStyle, borderLeft: '4px solid #f59e0b' }
     : baseCardStyle;
-
-  const badgeStyle = typeColorMap[type];
 
   return (
     <div
@@ -145,7 +147,7 @@ export default function ResourceCard({
             onMouseEnter={(e) => (e.currentTarget.style.color = '#92400e')}
             onMouseLeave={(e) => (e.currentTarget.style.color = '#d97706')}
           >
-            {actionTextMap[type]}
+            {actionTextMap[type] || 'View resource'}
           </span>
           <ArrowRightIcon
             style={{
