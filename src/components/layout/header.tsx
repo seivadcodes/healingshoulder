@@ -1,27 +1,23 @@
-﻿'use client';
+﻿﻿'use client';
 
 import Link from 'next/link';
 import { Home, User, LogOut } from 'lucide-react';
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/hooks/useAuth'; // ✅ your hook
+import { useAuth } from '@/hooks/useAuth';
 import { useState, useEffect } from 'react';
 
 export default function Header() {
   const pathname = usePathname();
-  const { user, loading, signOut } = useAuth(); // ✅ from your system
+  const { user, loading, signOut } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [initials, setInitials] = useState('U');
 
-  // Compute initials when user loads
   useEffect(() => {
     if (user) {
       let name = '';
-
-      // Try to get name from user metadata (set during sign-up)
       if (user.user_metadata?.full_name) {
         name = user.user_metadata.full_name;
       } else if (user.email) {
-        // Fallback to email prefix
         name = user.email.split('@')[0];
       }
 
@@ -42,52 +38,159 @@ export default function Header() {
     setIsMenuOpen(false);
   };
 
-  // Don’t render sign-in or menu while loading
   if (loading) {
     return (
-      <header className="fixed top-0 left-0 right-0 z-50 bg-amber-50/90 backdrop-blur-sm border-b border-stone-200 shadow-sm">
-        <div className="max-w-2xl mx-auto px-4 py-3">
-          <div className="h-6 w-32 bg-stone-200 rounded animate-pulse"></div>
+      <header
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          backgroundColor: 'rgba(253, 230, 138, 0.9)', // amber-50/90 approx
+          backdropFilter: 'blur(4px)',
+          borderBottom: '1px solid #e2e2e2', // stone-200
+          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '48rem', // ~2xl
+            margin: '0 auto',
+            padding: '0.75rem 1rem', // py-3 px-4
+          }}
+        >
+          <div
+            style={{
+              height: '1.5rem',
+              width: '8rem',
+              backgroundColor: '#e2e2e2',
+              borderRadius: '0.25rem',
+              animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }}
+          ></div>
         </div>
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+        `}</style>
       </header>
     );
   }
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-50 bg-amber-50/90 backdrop-blur-sm border-b border-stone-200 shadow-sm">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+      <header
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          backgroundColor: 'rgba(253, 230, 138, 0.9)',
+          backdropFilter: 'blur(4px)',
+          borderBottom: '1px solid #e2e2e2',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '48rem',
+            margin: '0 auto',
+            padding: '0.75rem 1rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
           <Link
             href="/"
-            className="flex items-center gap-2 text-stone-800 hover:text-amber-700 transition-colors"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              color: '#1c1917', // stone-800
+              textDecoration: 'none',
+              transition: 'color 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#b45309')} // amber-700
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#1c1917')}
             aria-label="Back to Home"
           >
             <Home size={20} />
-            <span className="font-medium">Healing Shoulder</span>
+            <span style={{ fontWeight: 500 }}>Healing Shoulder</span>
           </Link>
 
           {user ? (
-            <div className="relative">
+            <div style={{ position: 'relative' }}>
               <button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-medium text-sm"
+                style={{
+                  width: '2rem',
+                  height: '2rem',
+                  borderRadius: '9999px',
+                  backgroundColor: '#d97706', // amber-500
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 500,
+                  fontSize: '0.875rem', // text-sm
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
                 aria-label="User menu"
               >
                 {initials}
               </button>
 
               {isMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white border border-stone-200 rounded-lg shadow-lg py-1 z-50">
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: '2.5rem',
+                    width: '12rem',
+                    backgroundColor: 'white',
+                    border: '1px solid #e2e2e2',
+                    borderRadius: '0.5rem',
+                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                    padding: '0.25rem 0',
+                    zIndex: 50,
+                  }}
+                >
                   <Link
                     href="/dashboard"
-                    className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"
+                    style={{
+                      display: 'block',
+                      padding: '0.5rem 1rem',
+                      fontSize: '0.875rem',
+                      color: '#3f3f46', // stone-700
+                      textDecoration: 'none',
+                    }}
                     onClick={() => setIsMenuOpen(false)}
                   >
                     Dashboard
                   </Link>
                   <button
                     onClick={handleLogout}
-                    className="w-full text-left px-4 py-2 text-sm text-stone-700 hover:bg-stone-100 flex items-center gap-2"
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '0.5rem 1rem',
+                      fontSize: '0.875rem',
+                      color: '#3f3f46',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')} // stone-100
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                   >
                     <LogOut size={16} />
                     Sign Out
@@ -98,7 +201,17 @@ export default function Header() {
           ) : (
             <Link
               href="/auth"
-              className="flex items-center gap-1 text-stone-700 hover:text-amber-700 text-sm font-medium"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                color: '#3f3f46', // stone-700
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                textDecoration: 'none',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#b45309')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#3f3f46')}
             >
               <User size={18} />
               <span>Sign In</span>
@@ -109,7 +222,15 @@ export default function Header() {
 
       {isMenuOpen && (
         <div
-          className="fixed inset-0 z-40"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 40,
+            backgroundColor: 'transparent',
+          }}
           onClick={() => setIsMenuOpen(false)}
         ></div>
       )}
