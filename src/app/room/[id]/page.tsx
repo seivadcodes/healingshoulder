@@ -453,117 +453,9 @@ export default function RoomPage() {
     }}>
       <Keyframes />
       <div style={{ maxWidth: '42rem', margin: '0 auto' }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '1.5rem'
-        }}>
-          <div>
-            <h1 style={{
-              fontSize: '1.5rem',
-              fontWeight: '700',
-              color: '#292524'
-            }}>Audio Call</h1>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              marginTop: '0.25rem'
-            }}>
-              <div style={{ display: 'flex', marginLeft: '-0.5rem' }}>
-                {participants.map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      width: '2.5rem',
-                      height: '2.5rem',
-                      borderRadius: '9999px',
-                      border: p.id === user?.id 
-                        ? '2px solid #fbbf24' 
-                        : '2px solid #e7e5e4',
-                      background: '#e7e5e4',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      marginLeft: '0.5rem'
-                    }}
-                  >
-                    {p.avatar ? (
-                      <img 
-                        src={p.avatar} 
-                        alt={p.name} 
-                        style={{ 
-                          width: '100%', 
-                          height: '100%', 
-                          objectFit: 'cover' 
-                        }} 
-                      />
-                    ) : (
-                      <span style={{ 
-                        color: '#44403c', 
-                        fontWeight: '500',
-                        fontSize: '0.875rem'
-                      }}>{p.name.charAt(0)}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <span style={{ color: '#57534e' }}>{participants.length} participant{participants.length !== 1 ? 's' : ''}</span>
-            </div>
-          </div>
+       
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              background: '#ffedd5',
-              color: '#92400e',
-              borderRadius: '9999px',
-              padding: '0.25rem 0.75rem'
-            }}>
-              <Clock size={16} />
-              <span style={{ fontWeight: '500' }}>{formatDuration(callDuration)}</span>
-            </div>
-            <button
-              onClick={() => leaveRoom(true)}
-              disabled={isLeaving}
-              style={{
-                background: isLeaving ? '#e7e5e4' : '#ef4444',
-                color: '#ffffff',
-                fontWeight: '700',
-                padding: '0.5rem 1rem',
-                borderRadius: '9999px',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                cursor: isLeaving ? 'not-allowed' : 'pointer',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseOver={(e) => !isLeaving && (e.currentTarget.style.background = '#dc2626')}
-              onMouseOut={(e) => !isLeaving && (e.currentTarget.style.background = '#ef4444')}
-            >
-              {isLeaving ? (
-                <div style={{
-                  animation: 'spin 1s linear infinite',
-                  borderRadius: '9999px',
-                  height: '1rem',
-                  width: '1rem',
-                  border: '2px solid transparent',
-                  borderLeftColor: '#ffffff'
-                }}></div>
-              ) : (
-                <PhoneOff size={18} />
-              )}
-              Leave
-            </button>
-          </div>
-        </div>
-
-        <div style={{
+                          <div style={{
           background: '#ffffff',
           borderRadius: '0.75rem',
           border: '1px solid #e7e5e4',
@@ -571,6 +463,42 @@ export default function RoomPage() {
           marginBottom: '1.5rem',
           textAlign: 'center'
         }}>
+          {/* Name of the other participant */}
+          <h2 style={{
+            fontSize: '1.25rem',
+            fontWeight: '700',
+            color: '#292524',
+            marginBottom: '0.5rem',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}>
+            {(() => {
+              const other = participants.find(p => p.id !== user?.id);
+              return other ? other.name : 'Anonymous';
+            })()}
+          </h2>
+
+          {/* Timer */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '0.25rem',
+            background: '#ffedd5',
+            color: '#92400e',
+            borderRadius: '9999px',
+            padding: '0.25rem 0.75rem',
+            margin: '0 auto 1.25rem auto',
+            width: 'fit-content'
+          }}>
+            <Clock size={14} />
+            <span style={{ fontWeight: '600', fontSize: '0.875rem' }}>
+              {formatDuration(callDuration)}
+            </span>
+          </div>
+
+          {/* Human head icon BELOW timer */}
           <div style={{
             width: '5rem',
             height: '5rem',
@@ -579,144 +507,35 @@ export default function RoomPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            margin: '0 auto 1rem auto'
+            margin: '0 auto 2rem auto' // ← Increased from 1rem to 2rem for more breathing room
           }}>
             <UserIcon size={40} style={{ color: '#b45309' }} />
           </div>
-          <h2 style={{
-            fontSize: '1.25rem',
-            fontWeight: '700',
-            color: '#292524',
-            marginBottom: '0.5rem'
-          }}>
-            {isInCall ? 'Call in Progress' : 'Connecting...'}
-          </h2>
+
+          {/* Status message (e.g., "Other participant muted") */}
           <p style={{ 
             color: '#57534e', 
-            marginBottom: '1rem' 
+            marginBottom: '1.25rem',
+            minHeight: '1.25rem'
           }}>
-            {remoteMuted ? 'Other participant muted' : 'Listening...'}
+            {remoteMuted ? 'Other participant muted' : ''}
           </p>
-        </div>
 
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '0.75rem',
-          border: '1px solid #e7e5e4',
-          padding: '1.5rem',
-          marginBottom: '1.5rem'
-        }}>
-          <h2 style={{
-            fontSize: '1.25rem',
-            fontWeight: '700',
-            color: '#292524',
-            marginBottom: '1rem'
-          }}>Participants</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {participants.map((p) => (
-              <div
-                key={p.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
-                  background: p.id === user?.id ? '#fffbf5' : '',
-                  transition: 'background-color 0.2s'
-                }}
-                onMouseOver={(e) => p.id !== user?.id && (e.currentTarget.style.background = '#f5f5f4')}
-                onMouseOut={(e) => p.id !== user?.id && (e.currentTarget.style.background = '')}
-              >
-                <div
-                  style={{
-                    width: '3rem',
-                    height: '3rem',
-                    borderRadius: '9999px',
-                    border: p.id === user?.id 
-                      ? '2px solid #fbbf24' 
-                      : '1px solid #e7e5e4',
-                    background: '#e7e5e4',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                    flexShrink: 0
-                  }}
-                >
-                  {p.avatar ? (
-                    <img 
-                      src={p.avatar} 
-                      alt={p.name} 
-                      style={{ 
-                        width: '100%', 
-                        height: '100%', 
-                        objectFit: 'cover',
-                        borderRadius: '9999px'
-                      }} 
-                    />
-                  ) : (
-                    <span style={{ 
-                      color: '#44403c', 
-                      fontWeight: '500',
-                      fontSize: '1.125rem'
-                    }}>{p.name.charAt(0)}</span>
-                  )}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <h3 style={{
-                    fontWeight: '500',
-                    color: '#292524',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>{p.name}</h3>
-                  <p style={{ 
-                    fontSize: '0.75rem',
-                    fontWeight: '500',
-                    color: p.id === user?.id 
-                      ? '#b45309' 
-                      : callEndedByPeer 
-                        ? '#6b7280' 
-                        : remoteMuted 
-                          ? '#6b7280' 
-                          : '#10b981'
-                  }}>
-                    {p.id === user?.id
-                      ? 'You'
-                      : callEndedByPeer
-                      ? 'Left'
-                      : remoteMuted
-                      ? 'Muted'
-                      : 'Connected'}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '0.75rem',
-          border: '1px solid #e7e5e4',
-          padding: '1.5rem',
-          marginBottom: '1.5rem'
-        }}>
-          <h3 style={{
-            fontWeight: '700',
-            color: '#292524',
-            marginBottom: '1rem'
-          }}>Audio Control</h3>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
+          {/* Call Controls: Mute + Leave */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap'
+          }}>
+            {/* Mute Button */}
             <button
               onClick={toggleAudio}
               disabled={!isInCall || callEndedByPeer}
               style={{
-                padding: '1rem',
-                borderRadius: '0.75rem',
+                padding: '0.625rem 1.25rem',
+                borderRadius: '9999px',
                 display: 'flex',
-                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
@@ -724,40 +543,93 @@ export default function RoomPage() {
                 backgroundColor: !isInCall || callEndedByPeer 
                   ? '#f5f5f4' 
                   : isAudioEnabled 
-                    ? '#eff6ff' 
-                    : '#f5f5f4',
+                    ? '#f0fdf4' 
+                    : '#fef2f2',
                 color: !isInCall || callEndedByPeer 
                   ? '#9ca3af' 
                   : isAudioEnabled 
-                    ? '#1d4ed8' 
-                    : '#6b7280',
+                    ? '#047857' 
+                    : '#dc2626',
                 cursor: !isInCall || callEndedByPeer ? 'not-allowed' : 'pointer',
-                border: 'none'
+                border: 'none',
+                fontWeight: '600',
+                fontSize: '0.875rem',
+                minWidth: '90px'
               }}
               onMouseOver={(e) => {
                 if (!isInCall || callEndedByPeer) return;
                 if (isAudioEnabled) {
-                  e.currentTarget.style.background = '#dbeafe';
+                  e.currentTarget.style.background = '#d1fae5';
                 } else {
-                  e.currentTarget.style.background = '#e5e7eb';
+                  e.currentTarget.style.background = '#fecaca';
                 }
               }}
               onMouseOut={(e) => {
                 if (!isInCall || callEndedByPeer) return;
                 if (isAudioEnabled) {
-                  e.currentTarget.style.background = '#eff6ff';
+                  e.currentTarget.style.background = '#f0fdf4';
                 } else {
-                  e.currentTarget.style.background = '#f5f5f4';
+                  e.currentTarget.style.background = '#fef2f2';
                 }
               }}
             >
-              {isAudioEnabled ? <Mic size={28} /> : <MicOff size={28} />}
-              <span style={{ fontSize: '0.875rem', fontWeight: '500' }}>
-                {isAudioEnabled ? 'Mute' : 'Unmute'}
-              </span>
+              {isAudioEnabled ? <Mic size={16} /> : <MicOff size={16} />}
+              {isAudioEnabled ? 'Mute' : 'Unmute'}
+            </button>
+
+            {/* Leave Button — RED like original */}
+            <button
+              onClick={() => leaveRoom(true)}
+              disabled={isLeaving || callEndedByPeer}
+              style={{
+                padding: '0.625rem 1.25rem',
+                borderRadius: '9999px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                transition: 'background-color 0.2s',
+                backgroundColor: isLeaving || callEndedByPeer 
+                  ? '#e7e5e4' 
+                  : '#fef2f2', // ← Light red background, matches mockup
+                color: isLeaving || callEndedByPeer 
+                  ? '#9ca3af' 
+                  : '#dc2626', // ← Strong red text
+                cursor: isLeaving || callEndedByPeer ? 'not-allowed' : 'pointer',
+                border: 'none',
+                fontWeight: '600',
+                fontSize: '0.875rem',
+                minWidth: '90px'
+              }}
+              onMouseOver={(e) => {
+                if (isLeaving || callEndedByPeer) return;
+                e.currentTarget.style.background = '#fecaca'; // hover state
+              }}
+              onMouseOut={(e) => {
+                if (isLeaving || callEndedByPeer) return;
+                e.currentTarget.style.background = '#fef2f2';
+              }}
+            >
+              {isLeaving ? (
+                <div style={{
+                  animation: 'spin 1s linear infinite',
+                  borderRadius: '9999px',
+                  height: '12px',
+                  width: '12px',
+                  border: '2px solid transparent',
+                  borderLeftColor: '#dc2626'
+                }}></div>
+              ) : (
+                <PhoneOff size={16} style={{ color: '#dc2626' }} /> // Optional: force red icon
+              )}
+              <span style={{ color: '#dc2626' }}>Leave</span> {/* Explicitly set red text */}
             </button>
           </div>
         </div>
+        
+
+        
+         
       </div>
     </div>
   );
