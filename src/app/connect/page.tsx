@@ -1,11 +1,11 @@
-﻿﻿﻿﻿'use client';
+﻿﻿'use client';
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { Phone, X, MessageCircle, Clock, User } from 'lucide-react';
 
-// Shared base styles
+// Shared base styles (unchanged)
 const styles = {
   container: {
     minHeight: '100vh',
@@ -13,7 +13,7 @@ const styles = {
     padding: '1rem',
   },
   maxWidth: {
-    maxWidth: '56rem', // ~max-w-4xl
+    maxWidth: '56rem',
     margin: '0 auto',
   },
   sectionGap: { marginBottom: '2rem' },
@@ -31,16 +31,16 @@ const styles = {
     marginBottom: '2rem',
   },
   title: {
-    fontSize: '1.875rem', // text-3xl
+    fontSize: '1.875rem',
     fontWeight: '700',
-    color: '#1c1917', // stone-800
+    color: '#1c1917',
   },
   subtitle: {
-    color: '#78716c', // stone-600
+    color: '#78716c',
     marginTop: '0.5rem',
   },
   button: {
-    background: '#d97706', // amber-500
+    background: '#d97706',
     color: '#fff',
     fontWeight: '600',
     padding: '0.75rem 2rem',
@@ -53,7 +53,7 @@ const styles = {
     transition: 'background 0.2s',
   },
   disabledButton: {
-    background: '#fbbf24', // amber-300
+    background: '#fbbf24',
     cursor: 'not-allowed',
   },
   iconButton: {
@@ -67,20 +67,19 @@ const styles = {
     width: '3rem',
     height: '3rem',
     borderRadius: '9999px',
-    background: '#fef3c7', // amber-100
-    border: '2px solid #fcd34d', // amber-300
+    background: '#fef3c7',
+    border: '2px solid #fcd34d',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0 as const,
   },
   requestCard: {
-    background: '#fffbeb', // amber-50
+    background: '#fffbeb',
     border: '1px solid #fcd34d',
     borderRadius: '0.75rem',
     padding: '1.5rem',
   },
-  hoverBg: { background: '#fffbeb' },
   grid: {
     display: 'grid',
     gridTemplateColumns: '1fr',
@@ -114,10 +113,38 @@ export default function ConnectPage() {
   const supabase = createClient();
   const [isPostingRequest, setIsPostingRequest] = useState(false);
   const isRedirectingRef = useRef(false);
-  const requestSubscriptionRef = useRef<any>(null);
 
+  // Polling logic with visibility awareness
   useEffect(() => {
     let isMounted = true;
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    const fetchAllData = async (userId: string) => {
+      try {
+        await fetchAvailableRequests(userId);
+        await fetchActiveRequests(userId);
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    };
+
+    const startPolling = (userId: string) => {
+      if (pollInterval) return; // already running
+
+      const poll = () => {
+        if (
+          !isRedirectingRef.current &&
+          !document.hidden && // only poll if tab is visible
+          isMounted
+        ) {
+          fetchAllData(userId);
+        }
+      };
+
+      pollInterval = setInterval(poll, 8000); // every 8 seconds
+      poll(); // fetch immediately
+    };
+
     const initialize = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -136,9 +163,8 @@ export default function ConnectPage() {
         
         if (isMounted) setUser(profile);
 
-        await fetchActiveRequests(session.user.id);
-        await fetchAvailableRequests(session.user.id);
-        setupRealtimeSubscription(session.user.id);
+        // Start smart polling
+        startPolling(session.user.id);
       } catch (err) {
         console.error('Initialization error:', err);
         if (isMounted) setError('Failed to load connection requests');
@@ -151,52 +177,12 @@ export default function ConnectPage() {
 
     return () => {
       isMounted = false;
-      if (requestSubscriptionRef.current) {
-        supabase.removeChannel(requestSubscriptionRef.current);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
       }
     };
   }, []);
-
-  const setupRealtimeSubscription = (userId: string) => {
-    if (requestSubscriptionRef.current) {
-      supabase.removeChannel(requestSubscriptionRef.current);
-    }
-
-    const channel = supabase
-      .channel('quick_connect_requests')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quick_connect_requests'
-        },
-        async (payload) => {
-          if (isRedirectingRef.current) return;
-          
-          try {
-            if (
-              payload.eventType === 'UPDATE' && 
-              payload.new.user_id === userId && 
-              payload.new.status === 'matched' && 
-              payload.new.room_id
-            ) {
-              isRedirectingRef.current = true;
-              router.push(`/room/${payload.new.room_id}`);
-              return;
-            }
-
-            await fetchAvailableRequests(userId);
-            await fetchActiveRequests(userId);
-          } catch (err) {
-            console.error('Realtime update error:', err);
-          }
-        }
-      )
-      .subscribe();
-
-    requestSubscriptionRef.current = channel;
-  };
 
   const fetchActiveRequests = async (userId: string) => {
     try {
@@ -236,7 +222,6 @@ export default function ConnectPage() {
       });
     } catch (err) {
       console.error('Error fetching active requests:', err);
-      throw err;
     }
   };
 
@@ -268,7 +253,6 @@ export default function ConnectPage() {
       setAvailableRequests(formattedRequests);
     } catch (err) {
       console.error('Error fetching available requests:', err);
-      throw err;
     }
   };
 
@@ -302,8 +286,6 @@ export default function ConnectPage() {
           avatar_url: user.avatar_url
         }
       });
-      
-      setupRealtimeSubscription(user.id);
     } catch (err) {
       console.error('Failed to post request:', err);
       setError('Failed to create connection request. Please try again.');
@@ -377,25 +359,11 @@ export default function ConnectPage() {
     return `${Math.floor(diff / 3600)}h ago`;
   };
 
+  // ✅ Minimal loading state — no spinner
   if (isLoading) {
     return (
-      <div style={{ ...styles.container, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            width: '3rem',
-            height: '3rem',
-            borderRadius: '9999px',
-            border: '4px solid transparent',
-            borderTopColor: '#d97706',
-            animation: 'spin 1s linear infinite',
-          }}></div>
-          <p style={{ color: '#78716c', marginTop: '1rem' }}>Finding connections...</p>
-        </div>
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+      <div style={{ ...styles.container, display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+        <p style={{ color: '#78716c' }}>Connecting...</p>
       </div>
     );
   }
@@ -505,25 +473,7 @@ export default function ConnectPage() {
                 boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
               }}
             >
-              {isPostingRequest ? (
-                <>
-                  <div style={{
-                    width: '1.25rem',
-                    height: '1.25rem',
-                    borderRadius: '9999px',
-                    border: '2px solid transparent',
-                    borderTopColor: '#fff',
-                    animation: 'spin 1s linear infinite',
-                    marginRight: '0.5rem',
-                  }}></div>
-                  Creating request...
-                </>
-              ) : (
-                <>
-                  <Phone size={20} />
-                  Post Request
-                </>
-              )}
+              {isPostingRequest ? 'Creating request...' : <><Phone size={20} /> Post Request</>}
             </button>
           </div>
         )}
@@ -540,7 +490,7 @@ export default function ConnectPage() {
           </div>
 
           {availableRequests.length > 0 ? (
-            <div style={{}}>
+            <div>
               {availableRequests.map((request) => (
                 <div
                   key={request.id}
@@ -572,7 +522,7 @@ export default function ConnectPage() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <Phone size={24} style={{ color: '#d97706', marginLeft: '0.75rem', transition: 'transform 0.2s' }} />
+                      <Phone size={24} style={{ color: '#d97706', marginLeft: '0.75rem' }} />
                     </div>
                   </div>
                 </div>

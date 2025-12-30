@@ -1,173 +1,127 @@
-// src/components/ResourceCard.tsx
+// src/components/layout/FooterNav.tsx
 'use client';
 
 import Link from 'next/link';
-import { Users, Dot, BookOpen } from 'lucide-react';
-import { ArrowRightIcon } from '@heroicons/react/24/outline';
+import { usePathname } from 'next/navigation';
+import {
+  UserPlus,
+  Users,
+  BookOpen,
+  Calendar,
+  Gamepad2,
+} from 'lucide-react';
 
-export type ResourceType = 'Guide' | 'Story' | 'Video' | 'Tool' | 'Book';
+const navItems = [
+  { name: 'Connect', href: '/connect', icon: UserPlus },
+  { name: 'Communities', href: '/communities', icon: Users },
+  { name: 'Resources', href: '/resources', icon: BookOpen },
+  { name: 'Schedule', href: '/schedule', icon: Calendar },
+  // { name: 'Games', href: '/games', icon: Gamepad2 },
+];
 
-interface ResourceCardProps {
-  id: number;
-  title: string;
-  excerpt: string;
-  type: ResourceType;
-  featured?: boolean;
-  author?: string;
-  liveViewers?: number;
-  communitySource?: string;
-  sharedAgo?: string;
-}
+export default function FooterNav() {
+  const pathname = usePathname();
 
-const actionTextMap: Record<ResourceType, string> = {
-  Guide: 'Read more',
-  Story: 'Read story',
-  Video: 'Watch now',
-  Tool: 'Download tool',
-  Book: 'Read excerpt',
-};
+  // Dark blue background for footer
+  const darkBlue = '#1e3a8a'; // Tailwind blue-800 — feel free to change
 
-const typeColorMap: Record<ResourceType, { bg: string; text: string }> = {
-  Guide: { bg: '#dbeafe', text: '#1e40af' },
-  Story: { bg: '#fef3c7', text: '#92400e' },
-  Video: { bg: '#ede9fe', text: '#7c3aed' },
-  Tool: { bg: '#dcfce7', text: '#047857' },
-  Book: { bg: '#fce7f3', text: '#be185d' },
-};
-
-// Fallback style in case an invalid type is passed
-const fallbackBadgeStyle = { bg: '#f3f4f6', text: '#4b5563' };
-
-export default function ResourceCard({
-  id,
-  title,
-  excerpt,
-  type,
-  featured = false,
-  author,
-  liveViewers,
-  communitySource,
-  sharedAgo,
-}: ResourceCardProps) {
-  // Use fallback if type is invalid
-  const badgeStyle = typeColorMap[type] || fallbackBadgeStyle;
-
-  const baseCardStyle: React.CSSProperties = {
-    backgroundColor: 'white',
-    padding: 0,
-    borderRadius: '0.5rem',
-    transition: 'box-shadow 0.2s ease',
-    border: featured ? 'none' : '1px solid #e5e5e5',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-    position: 'relative',
+  const footerStyle: React.CSSProperties = {
+    position: 'fixed',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+    backgroundColor: darkBlue,
+    backdropFilter: 'blur(8px)',
   };
 
-  const cardStyle: React.CSSProperties = featured
-    ? { ...baseCardStyle, borderLeft: '4px solid #f59e0b' }
-    : baseCardStyle;
+  const footerStyleMd: React.CSSProperties = {
+    position: 'static',
+    borderTop: 'none',
+    backgroundColor: 'transparent',
+    backdropFilter: 'none',
+  };
+
+  const navContainerStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    height: '3.5rem',
+    padding: '0 0.5rem',
+  };
+
+  const navContainerStyleMd: React.CSSProperties = {
+    padding: '0 1rem',
+  };
+
+  const linkBaseStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.75rem',
+    fontWeight: 500,
+    transition: 'color 0.2s ease',
+    padding: '0.25rem 0',
+    color: 'white', // label text is white to match dark footer
+  };
+
+  const isMd = false;
 
   return (
-    <div
-      style={cardStyle}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = featured
-          ? '0 4px 8px rgba(0,0,0,0.1)'
-          : '0 4px 6px rgba(0,0,0,0.1)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
-      }}
-    >
-      <div style={{ padding: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-          <h3 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1c1917', lineHeight: '1.3' }}>{title}</h3>
-          <span
-            style={{
-              backgroundColor: badgeStyle.bg,
-              color: badgeStyle.text,
-              padding: '0.25rem 0.5rem',
-              fontSize: '0.75rem',
-              borderRadius: '9999px',
-              fontWeight: '500',
-            }}
-          >
-            {type}
-          </span>
-        </div>
-        <p style={{ color: '#44403c', fontSize: '0.875rem', marginBottom: '0.5rem' }}>{excerpt}</p>
+    <footer style={isMd ? { ...footerStyle, ...footerStyleMd } : footerStyle}>
+      <div style={isMd ? { ...navContainerStyle, ...navContainerStyleMd } : navContainerStyle}>
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = pathname === item.href;
 
-        {/* Author (for books) */}
-        {author && (
-          <p style={{ color: '#78716c', fontSize: '0.75rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
-            <BookOpen
-              size={12}
-              style={{
-                marginRight: '0.25rem',
-                strokeWidth: 2.5,
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              style={linkBaseStyle}
+              onMouseEnter={(e) => {
+                if (!isActive) {
+                  const icon = e.currentTarget.querySelector('svg');
+                  if (icon) icon.style.color = '#1f2937'; // dark gray on hover
+                }
               }}
-            />
-            {author}
-          </p>
-        )}
-
-        {/* Community or live info */}
-        {(liveViewers || communitySource) && (
-          <div style={{ color: '#78716c', fontSize: '0.75rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
-            {liveViewers ? (
-              <>
-                <Dot size={12} style={{ color: '#ef4444', fill: '#ef4444', marginRight: '0.25rem' }} />
-                {liveViewers} watching now
-              </>
-            ) : communitySource ? (
-              <>
-                <Users
-                  size={12}
+              onMouseLeave={(e) => {
+                if (!isActive) {
+                  const icon = e.currentTarget.querySelector('svg');
+                  if (icon) icon.style.color = '#000000'; // back to black
+                }
+              }}
+              aria-label={item.name}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  backgroundColor: 'white',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                  marginBottom: '0.25rem',
+                }}
+              >
+                <Icon
+                  size={18}
+                  strokeWidth={3}
                   style={{
-                    marginRight: '0.25rem',
-                    strokeWidth: 2.5,
+                    fill: isActive ? 'currentColor' : 'transparent',
+                    color: isActive ? '#3b82f6' : '#000000', // blue when active, black otherwise
                   }}
                 />
-                Shared in <span style={{ fontWeight: '600', marginLeft: '0.25rem' }}>{communitySource}</span> • {sharedAgo}
-              </>
-            ) : null}
-          </div>
-        )}
+              </div>
+              <span>{item.name}</span>
+            </Link>
+          );
+        })}
       </div>
-
-      {/* Footer with link */}
-      <div style={{ padding: '0 1rem 0.75rem 1rem' }}>
-        <Link href={`/resources/${id}`} style={{ display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>
-          <span
-            style={{
-              color: '#d97706',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              transition: 'color 0.2s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = '#92400e')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = '#d97706')}
-          >
-            {actionTextMap[type] || 'View resource'}
-          </span>
-          <ArrowRightIcon
-            style={{
-              marginLeft: '0.25rem',
-              width: '1rem',
-              height: '1rem',
-              strokeWidth: 2.5,
-              transition: 'transform 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateX(2px)';
-              (e.currentTarget as SVGElement).style.strokeWidth = '3';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateX(0)';
-              (e.currentTarget as SVGElement).style.strokeWidth = '2.5';
-            }}
-          />
-        </Link>
-      </div>
-    </div>
+    </footer>
   );
 }
