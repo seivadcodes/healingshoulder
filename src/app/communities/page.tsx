@@ -1,5 +1,4 @@
-﻿// src/app/communities/page.tsx
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -10,7 +9,6 @@ import Button from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
 
-// Types for community data
 interface Community {
   id: string;
   name: string;
@@ -22,6 +20,22 @@ interface Community {
   cover_photo_url?: string | null;
 }
 
+// Gradient mapping by grief type
+const griefGradients: Record<string, string> = {
+  parent: 'linear-gradient(135deg, #fcd34d, #f97316)',
+  child: 'linear-gradient(135deg, #d8b4fe, #8b5cf6)',
+  spouse: 'linear-gradient(135deg, #fda4af, #ec4899)',
+  sibling: 'linear-gradient(135deg, #5eead4, #06b6d4)',
+  friend: 'linear-gradient(135deg, #93c5fd, #6366f1)',
+  pet: 'linear-gradient(135deg, #fef08a, #f59e0b)',
+  miscarriage: 'linear-gradient(135deg, #fbcfe8, #e11d48)',
+  caregiver: 'linear-gradient(135deg, #e5e7eb, #f59e0b)',
+  suicide: 'linear-gradient(135deg, #ddd6fe, #a78bfa)',
+  other: 'linear-gradient(135deg, #e5e7eb, #9ca3af)',
+};
+
+const defaultGradient = 'linear-gradient(135deg, #fcd34d, #f97316)';
+
 export default function CommunitiesPage() {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +45,6 @@ export default function CommunitiesPage() {
   const supabase = createClient();
   const { user } = useAuth();
 
-  // Fetch communities from database
   useEffect(() => {
     const fetchCommunities = async () => {
       try {
@@ -41,25 +54,17 @@ export default function CommunitiesPage() {
           .order('member_count', { ascending: false });
 
         if (error) throw error;
-        
+
         if (data) {
-          // Add cover photo URLs
-          const communitiesWithPhotos = data.map(community => {
-            if (community.id) {
-              return {
-                ...community,
-                cover_photo_url: community.id 
-                  ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/communities/${community.id}/banner.jpg`
-                  : null
-              };
-            }
-            return community;
-          });
-          
+          const communitiesWithPhotos = data.map((community) => ({
+            ...community,
+            cover_photo_url: community.id
+              ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/communities/${community.id}/banner.jpg`
+              : null,
+          }));
+
           setCommunities(communitiesWithPhotos);
-          
-          // Calculate total online members across all communities
-          const total = communitiesWithPhotos.reduce((sum, community) => sum + community.online_count, 0);
+          const total = communitiesWithPhotos.reduce((sum, c) => sum + c.online_count, 0);
           setTotalOnline(total);
         }
       } catch (err) {
@@ -73,39 +78,18 @@ export default function CommunitiesPage() {
     fetchCommunities();
   }, [supabase]);
 
-  // Generate gradient colors based on grief type
-  const getGradientColors = (griefType: string) => {
-    const gradients: Record<string, string> = {
-      'parent': 'from-amber-200 to-orange-300',
-      'child': 'from-purple-200 to-indigo-300',
-      'spouse': 'from-rose-200 to-pink-300',
-      'sibling': 'from-teal-200 to-cyan-300',
-      'friend': 'from-blue-200 to-indigo-300',
-      'pet': 'from-yellow-200 to-amber-300',
-      'miscarriage': 'from-pink-200 to-rose-300',
-      'caregiver': 'from-stone-200 to-amber-300',
-      'suicide': 'from-violet-200 to-purple-300',
-      'other': 'from-gray-200 to-stone-300'
-    };
-    return gradients[griefType] || 'from-amber-200 to-orange-300';
-  };
-
-  // Format time since last activity
   const formatRecentActivity = (createdAt: string) => {
     const now = new Date();
     const created = new Date(createdAt);
     const diffMinutes = Math.floor((now.getTime() - created.getTime()) / 60000);
-    
     if (diffMinutes < 1) return 'Just now';
     if (diffMinutes < 2) return '1 minute ago';
     if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
     if (diffMinutes < 120) return '1 hour ago';
-    
     const hours = Math.floor(diffMinutes / 60);
     return `${hours} hours ago`;
   };
 
-  // Handle request new community
   const handleRequestCommunity = () => {
     if (!user) {
       router.push('/auth?redirectTo=/communities/create');
@@ -114,27 +98,78 @@ export default function CommunitiesPage() {
     router.push('/communities/create');
   };
 
+  // === Loading State ===
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-solid border-amber-500 border-t-transparent mx-auto mb-4"></div>
-          <p className="text-stone-600">Loading communities...</p>
+      <div
+        style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(to bottom, #fffbeb, #f5f5f1, #f0f0ee)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+        }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              height: '3rem',
+              width: '3rem',
+              borderRadius: '9999px',
+              border: '4px solid #f59e0b',
+              borderTopColor: 'transparent',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 1rem',
+            }}
+          />
+          <p style={{ color: '#64748b' }}>Loading communities...</p>
         </div>
       </div>
     );
   }
 
+  // === Error State ===
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl p-6 max-w-md text-center shadow-md">
-          <div className="text-amber-500 mb-3">
-            <Users className="h-12 w-12 mx-auto" />
+      <div
+        style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(to bottom, #fffbeb, #f5f5f1, #f0f0ee)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+        }}
+      >
+        <div
+          style={{
+            background: 'white',
+            borderRadius: '0.75rem',
+            padding: '1.5rem',
+            maxWidth: '28rem',
+            textAlign: 'center',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          }}
+        >
+          <div style={{ color: '#f59e0b', marginBottom: '0.75rem' }}>
+            <Users size={48} style={{ margin: '0 auto' }} />
           </div>
-          <h2 className="text-xl font-bold text-stone-800 mb-2">Error Loading Communities</h2>
-          <p className="text-stone-600 mb-4">{error}</p>
-          <Button onClick={() => router.refresh()} className="bg-amber-500 hover:bg-amber-600 text-white">
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.5rem' }}>
+            Error Loading Communities
+          </h2>
+          <p style={{ color: '#64748b', marginBottom: '1rem' }}>{error}</p>
+          <Button
+            onClick={() => router.refresh()}
+            style={{
+              background: '#f59e0b',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1.25rem',
+              borderRadius: '0.5rem',
+              cursor: 'pointer',
+            }}
+          >
             Try Again
           </Button>
         </div>
@@ -142,122 +177,293 @@ export default function CommunitiesPage() {
     );
   }
 
+  const containerStyle: React.CSSProperties = {
+    minHeight: '100vh',
+  background: 'linear-gradient(to bottom, #fffbeb, #f5f5f1, #f0f0ee)',
+  paddingTop: '5rem',
+  paddingBottom: '2rem',
+  paddingLeft: '1rem',
+  paddingRight: '1rem',
+  };
+
+  const innerContainerStyle: React.CSSProperties = {
+    maxWidth: '896px', // ~4xl
+    margin: '0 auto',
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 md:p-6 pt-20 md:pt-6">
-      <div className="max-w-4xl mx-auto">
+    <div style={containerStyle}>
+      <div style={innerContainerStyle}>
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-amber-200 to-orange-300 mb-4 mx-auto">
-            <Users className="h-7 w-7 text-white" />
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div
+            style={{
+              width: '3.5rem',
+              height: '3.5rem',
+              borderRadius: '9999px',
+              background: griefGradients.parent,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1rem',
+            }}
+          >
+            <Users size={28} color="white" />
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-stone-800 mb-2">
+          <h1
+            style={{
+              fontSize: '1.875rem',
+              fontWeight: '700',
+              color: '#1e293b',
+              marginBottom: '0.5rem',
+            }}
+          >
             Find Your Tribe
           </h1>
-          <p className="text-stone-600 max-w-2xl mx-auto">
+          <p style={{ color: '#64748b', maxWidth: '42rem', margin: '0 auto 1rem' }}>
             Join a circle where your grief is understood — not explained away. Share your story, read others', or simply be present.
           </p>
-          <div className="mt-4 inline-block px-4 py-2 rounded-full bg-green-100 text-green-800 text-sm font-medium">
+          <div
+            style={{
+              display: 'inline-block',
+              padding: '0.5rem 1rem',
+              borderRadius: '9999px',
+              background: '#dcfce7',
+              color: '#166534',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+            }}
+          >
             🟢 {totalOnline} people in communities right now
           </div>
         </div>
 
-        {/* Communities Grid */}
-        <div className="space-y-5 mb-12">
+        {/* Communities List */}
+        <div style={{ marginBottom: '3rem' }}>
           {communities.map((community) => (
             <Link
               key={community.id}
               href={`/communities/${community.id}`}
-              className="block transition-transform hover:scale-[1.01]"
+              style={{
+                display: 'block',
+                textDecoration: 'none',
+                transition: 'transform 0.15s ease-in-out',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.01)')}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
             >
-              <Card className="bg-white rounded-xl border border-stone-200 p-5 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+              <div
+                style={{
+                  background: 'white',
+                  borderRadius: '0.75rem',
+                  border: '1px solid #e2e8f0',
+                  padding: '1.25rem',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                  transition: 'box-shadow 0.2s ease',
+                  marginBottom: '1.25rem',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.08)')}
+                onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)')}
+              >
                 {/* Cover Photo */}
                 {community.cover_photo_url && (
-                  <div className="h-24 rounded-lg mb-4 overflow-hidden">
-                    <img 
-                      src={community.cover_photo_url} 
-                      alt={community.name} 
-                      className="w-full h-full object-cover"
+                  <div
+                    style={{
+                      height: '6rem',
+                      borderRadius: '0.5rem',
+                      overflow: 'hidden',
+                      marginBottom: '1rem',
+                    }}
+                  >
+                    <img
+                      src={community.cover_photo_url}
+                      alt={community.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => {
-                        e.currentTarget.parentElement!.style.display = 'none';
+                        (e.target as HTMLImageElement).parentElement!.style.display = 'none';
                       }}
                     />
                   </div>
                 )}
-                
-                {/* Community Header */}
-                <div className="flex items-start gap-4 mb-3">
+
+                {/* Header Section */}
+                <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.75rem' }}>
                   <div
-                    className={`w-12 h-12 rounded-full bg-gradient-to-br ${getGradientColors(community.grief_type)} flex items-center justify-center flex-shrink-0`}
+                    style={{
+                      width: '3rem',
+                      height: '3rem',
+                      borderRadius: '9999px',
+                      background: griefGradients[community.grief_type] || defaultGradient,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
                   >
-                    <Users size={20} className="text-white" />
+                    <Users size={20} color="white" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h2 className="font-bold text-stone-800 text-lg truncate">{community.name}</h2>
-                    <p className="text-sm text-stone-600 line-clamp-2">{community.description}</p>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <h2
+                      style={{
+                        fontWeight: '700',
+                        color: '#1e293b',
+                        fontSize: '1.125rem',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {community.name}
+                    </h2>
+                    <p
+                      style={{
+                        color: '#64748b',
+                        fontSize: '0.875rem',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {community.description}
+                    </p>
                   </div>
                 </div>
-                
+
                 {/* Stats */}
-                <div className="flex flex-wrap items-center gap-4 text-xs text-stone-500 mb-3">
-                  <span className="flex items-center gap-1">
-                    <Users size={14} className="text-stone-400" />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <Users size={14} style={{ color: '#94a3b8' }} />
                     {community.member_count.toLocaleString()} members
                   </span>
-                  <span className="flex items-center gap-1">
-                    <Heart size={14} className="text-green-600" />
-                    {community.online_count} online now
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <Heart size={14} style={{ color: '#16a34a' }} />
+                    {community.online_count} online
                   </span>
                 </div>
-                
-                {/* Recent Activity */}
-                <div className="flex items-start gap-2 text-sm">
-                  <MessageCircle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-stone-700">
+
+                {/* Activity */}
+                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
+                  <MessageCircle size={16} style={{ color: '#f59e0b', marginTop: '0.125rem' }} />
+                  <p>
                     {formatRecentActivity(community.created_at)}: Someone just shared a memory
                   </p>
                 </div>
-              </Card>
+              </div>
             </Link>
           ))}
         </div>
 
         {/* Empty State */}
         {communities.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-xl border border-dashed border-stone-300">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-100 text-amber-700 mb-4 mx-auto">
-              <Users className="h-6 w-6" />
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '3rem 1rem',
+              background: 'white',
+              borderRadius: '0.75rem',
+              border: '2px dashed #cbd5e1',
+              marginBottom: '2rem',
+            }}
+          >
+            <div
+              style={{
+                width: '3rem',
+                height: '3rem',
+                borderRadius: '9999px',
+                background: '#fef3c7',
+                color: '#b45309',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1rem',
+              }}
+            >
+              <Users size={24} />
             </div>
-            <h3 className="text-xl font-medium text-stone-800 mb-2">No communities yet</h3>
-            <p className="text-stone-600 mb-6 max-w-md mx-auto">
+            <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e293b', marginBottom: '0.5rem' }}>
+              No communities yet
+            </h3>
+            <p style={{ color: '#64748b', maxWidth: '28rem', margin: '0 auto 1.5rem' }}>
               Be the first to create a community for your grief experience. Your story matters, and others are waiting to hear it.
             </p>
-            <Button onClick={handleRequestCommunity} className="bg-amber-500 hover:bg-amber-600 text-white">
-              <Plus className="h-4 w-4 mr-2" />
+            <Button
+              onClick={handleRequestCommunity}
+              style={{
+                background: '#f59e0b',
+                color: 'white',
+                border: 'none',
+                padding: '0.5rem 1.25rem',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <Plus size={16} />
               Start Your Community
             </Button>
           </div>
         )}
 
-        {/* Create Community Button */}
-        <div className="bg-white rounded-xl border border-stone-200 p-5 text-center">
-          <p className="text-stone-600 mb-3">
+        {/* CTA Footer */}
+        <div
+          style={{
+            background: 'white',
+            borderRadius: '0.75rem',
+            border: '1px solid #e2e8f0',
+            padding: '1.25rem',
+            textAlign: 'center',
+          }}
+        >
+          <p style={{ color: '#64748b', marginBottom: '0.75rem' }}>
             Can't find a community that matches your grief experience?
           </p>
-          <Button 
+          <Button
             onClick={handleRequestCommunity}
-            className="bg-amber-500 hover:bg-amber-600 text-white"
+            style={{
+              background: '#f59e0b',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1.25rem',
+              borderRadius: '0.5rem',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus size={16} />
             Start a New Community
           </Button>
         </div>
 
-        {/* Community Guidelines Footer */}
-        <div className="mt-8 text-center text-stone-500 text-sm p-4 bg-white/50 rounded-lg">
+        {/* Guidelines Footer */}
+        <div
+          style={{
+            marginTop: '2rem',
+            textAlign: 'center',
+            fontSize: '0.875rem',
+            color: '#94a3b8',
+            padding: '1rem',
+            background: 'rgba(255,255,255,0.5)',
+            borderRadius: '0.5rem',
+          }}
+        >
           <p>All communities are moderated with care. We honor every story without judgment.</p>
-          <p className="mt-1 font-medium">Your grief is valid. Your presence matters.</p>
+          <p style={{ fontWeight: '600', marginTop: '0.25rem' }}>Your grief is valid. Your presence matters.</p>
         </div>
       </div>
+
+      {/* Optional: define animation if not in global CSS */}
+      <style jsx>{`
+        @keyframes spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
     </div>
   );
 }

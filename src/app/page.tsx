@@ -1,11 +1,11 @@
 // src/app/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSession } from '@/lib/matching';
 
-// Mock live activity feed — later powered by Supabase Realtime or Pusher
+// Mock live activity feed
 const mockLiveActivities = [
   { id: 1, type: 'chat', message: 'Live Now: 3 people in “Grief Support Chat” — join anonymously.', action: 'Join' },
   { id: 2, type: 'call', message: 'Someone just asked for a group call about “Coping with Holidays” — you can join.', action: 'Join Call' },
@@ -18,28 +18,44 @@ const mockLiveActivities = [
 export default function HomePage() {
   const router = useRouter();
   const [onlineCount, setOnlineCount] = useState(42);
-  const [activities] = useState(mockLiveActivities);
-  const [heartbeatClass, setHeartbeatClass] = useState('animate-pulse');
   const [isConnecting, setIsConnecting] = useState(false);
+  const heartbeatRef = useRef<HTMLDivElement>(null);
 
   // Simulate online count fluctuation
   useEffect(() => {
     const interval = setInterval(() => {
       setOnlineCount((prev) => {
-        const fluctuation = Math.floor(Math.random() * 6) - 2; // -2 to +3
+        const fluctuation = Math.floor(Math.random() * 6) - 2;
         return Math.max(10, prev + fluctuation);
       });
     }, 8000);
     return () => clearInterval(interval);
   }, []);
 
-  // Subtle breathing animation for heartbeat circle
+  // Manual heartbeat animation via JS (since inline styles can't do keyframes easily)
   useEffect(() => {
-    const anim = setInterval(() => {
-      setHeartbeatClass('animate-pulse opacity-90');
-      setTimeout(() => setHeartbeatClass('animate-pulse opacity-100'), 500);
-    }, 4000);
-    return () => clearInterval(anim);
+    let pulseInterval: NodeJS.Timeout;
+    let pingInterval: NodeJS.Timeout;
+
+    const startPulse = () => {
+      if (!heartbeatRef.current) return;
+      heartbeatRef.current.style.opacity = '0.9';
+      setTimeout(() => {
+        if (heartbeatRef.current) {
+          heartbeatRef.current.style.opacity = '1';
+        }
+      }, 500);
+    };
+
+    pulseInterval = setInterval(startPulse, 4000);
+    pingInterval = setInterval(() => {
+      // Simulate ping glow by briefly changing box-shadow (optional)
+    }, 2000);
+
+    return () => {
+      clearInterval(pulseInterval);
+      clearInterval(pingInterval);
+    };
   }, []);
 
   const handleQuickConnect = async () => {
@@ -60,68 +76,160 @@ export default function HomePage() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 md:p-6">
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        background: 'linear-gradient(to bottom, #fffbeb, #f5f5f4, #f4f4f5)',
+        padding: '1rem',
+      }}
+    >
       {/* Main Heartbeat Circle */}
       <div
-        className={`relative flex flex-col items-center justify-center w-64 h-64 md:w-80 md:h-80 rounded-full bg-gradient-to-br from-amber-100 to-stone-200 border border-stone-300 shadow-lg my-12 transition-all duration-1000 ${heartbeatClass}`}
+        ref={heartbeatRef}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '16rem',
+          height: '16rem',
+          borderRadius: '9999px',
+          background: 'linear-gradient(135deg, #fef3c7, #e5e5e4)',
+          border: '1px solid #d6d3d1',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.08)',
+          margin: '3rem 0',
+          transition: 'all 1s ease',
+          opacity: 1,
+        }}
       >
-        <div className="text-center px-4 z-10">
-          <h1 className="text-2xl md:text-3xl font-medium text-stone-800 mb-2">
+        <div style={{ textAlign: 'center', padding: '0 1rem', zIndex: 1 }}>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: '500', color: '#1c1917', marginBottom: '0.5rem' }}>
             Someone is here with you.
           </h1>
-          <p className="text-stone-600 text-lg">Right now.</p>
+          <p style={{ color: '#44403c', fontSize: '1.125rem' }}>Right now.</p>
         </div>
-        {/* Pulsing glow effect */}
-        <div className="absolute inset-0 rounded-full bg-amber-200 opacity-30 animate-ping"></div>
+        {/* Optional: add subtle glow via box-shadow animation if needed — but inline can't animate easily */}
       </div>
 
       {/* Primary Action Buttons */}
-      <div className="w-full max-w-md space-y-4 mb-10">
+      <div style={{ width: '100%', maxWidth: '32rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2.5rem' }}>
         <button
           onClick={handleQuickConnect}
           disabled={isConnecting}
-          className={`w-full py-4 font-semibold rounded-xl shadow-md transition transform active:scale-[0.98] ${
-            isConnecting
-              ? 'bg-amber-400 text-amber-100 cursor-not-allowed'
-              : 'bg-amber-500 hover:bg-amber-600 text-white hover:scale-[1.02]'
-          }`}
+          style={{
+            width: '100%',
+            padding: '1rem',
+            backgroundColor: isConnecting ? '#fbbf24' : '#f59e0b',
+            color: isConnecting ? '#fef3c7' : 'white',
+            fontWeight: '600',
+            borderRadius: '0.75rem',
+            border: 'none',
+            cursor: isConnecting ? 'not-allowed' : 'pointer',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+            transition: 'transform 0.2s, background-color 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            if (!isConnecting) e.currentTarget.style.transform = 'scale(1.02)';
+          }}
+          onMouseLeave={(e) => {
+            if (!isConnecting) e.currentTarget.style.transform = 'scale(1)';
+          }}
+          onTouchStart={(e) => {
+            if (!isConnecting) e.currentTarget.style.transform = 'scale(0.98)';
+          }}
+          onTouchEnd={(e) => {
+            if (!isConnecting) e.currentTarget.style.transform = 'scale(1)';
+          }}
         >
           {isConnecting ? 'Finding someone...' : '🟠 Talk Now'}
         </button>
 
         <button
           onClick={handleFindTribe}
-          className="w-full py-4 bg-stone-800 hover:bg-stone-700 text-white font-semibold rounded-xl shadow-md transition transform hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            width: '100%',
+            padding: '1rem',
+            backgroundColor: '#1c1917',
+            color: 'white',
+            fontWeight: '600',
+            borderRadius: '0.75rem',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+            transition: 'transform 0.2s',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.02)')}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          onTouchStart={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
+          onTouchEnd={(e) => (e.currentTarget.style.transform = 'scale(1)')}
         >
           🔵 Find Your Tribe
         </button>
       </div>
 
       {/* Live Presence Indicator */}
-      <div className="text-center mb-6">
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-          🟢 {onlineCount} people online · Tap to connect
+      <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '0.25rem 0.75rem',
+            borderRadius: '9999px',
+            backgroundColor: '#dcfce7',
+            color: '#047857',
+            fontSize: '0.875rem',
+            fontWeight: '600',
+            gap: '0.25rem',
+          }}
+        >
+          <span style={{ width: '0.5rem', height: '0.5rem', backgroundColor: '#10b981', borderRadius: '50%', display: 'inline-block' }}></span>
+          {onlineCount} people online · Tap to connect
         </span>
       </div>
 
       {/* Live Activity Feed */}
-      <div className="w-full max-w-md">
-        <h2 className="text-stone-700 font-medium mb-3 text-left">What’s happening now</h2>
-        <div className="space-y-3">
-          {activities.map((item) => (
+      <div style={{ width: '100%', maxWidth: '32rem' }}>
+        <h2 style={{ color: '#44403c', fontWeight: '600', marginBottom: '0.75rem', textAlign: 'left' }}>
+          What’s happening now
+        </h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {mockLiveActivities.map((item) => (
             <div
               key={item.id}
-              className="p-4 bg-white rounded-lg border border-stone-200 shadow-sm hover:shadow-md transition cursor-pointer"
               onClick={() => alert(`Action: ${item.action}`)}
+              style={{
+                padding: '1rem',
+                backgroundColor: 'white',
+                borderRadius: '0.75rem',
+                border: '1px solid #e5e5e5',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                cursor: 'pointer',
+                transition: 'box-shadow 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)')}
+              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)')}
             >
-              <p className="text-stone-800 text-sm md:text-base">{item.message}</p>
-              <span className="text-xs text-amber-600 font-medium mt-2 inline-block">
+              <p style={{ color: '#1c1917', fontSize: '0.95rem', marginBottom: '0.5rem' }}>{item.message}</p>
+              <span style={{ fontSize: '0.75rem', color: '#d97706', fontWeight: '600' }}>
                 {item.action} →
               </span>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Optional: global styles for pulse (if needed elsewhere) */}
+      <style jsx>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.85; }
+        }
+      `}</style>
     </div>
   );
 }

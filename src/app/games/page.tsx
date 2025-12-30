@@ -11,7 +11,7 @@ const mockGames = [
     id: 'memory-garden',
     title: 'Memory Garden',
     description: 'Plant a digital flower in quiet remembrance. Watch others bloom alongside you.',
-    icon: <Flower className="w-6 h-6" />,
+    icon: <Flower size={24} style={{ color: '#d97706' }} />,
     href: '/games/memory-garden',
     players: 7,
   },
@@ -19,15 +19,15 @@ const mockGames = [
     id: 'story-stones',
     title: 'Story Stones',
     description: 'Place symbolic stones in a shared river. Read or leave gentle memories.',
-    icon: <span className="text-xl">🪨</span>,
-    href: '#', // placeholder
+    icon: <span style={{ fontSize: '1.25rem' }}>🪨</span>,
+    href: '#',
     players: 3,
   },
   {
     id: 'breathing-together',
     title: 'Breathing Together',
     description: 'Synchronize your breath with others in real time. Calm your nervous system.',
-    icon: <span className="text-xl">🌬️</span>,
+    icon: <span style={{ fontSize: '1.25rem' }}>🌬️</span>,
     href: '#',
     players: 12,
   },
@@ -35,7 +35,7 @@ const mockGames = [
     id: 'hope-journal',
     title: 'Hope Journal',
     description: 'Write or read short, hopeful entries. Optional anonymity, always kindness.',
-    icon: <span className="text-xl">📖</span>,
+    icon: <span style={{ fontSize: '1.25rem' }}>📖</span>,
     href: '#',
     players: 5,
   },
@@ -58,35 +58,79 @@ export default function GamesPage() {
   }, []);
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 pb-24">
-      <div className="w-full max-w-md">
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        background: 'linear-gradient(to bottom, #fffbeb, #f5f5f4, #f4f4f5)',
+        padding: '1rem',
+        paddingBottom: '6rem',
+      }}
+    >
+      <div style={{ width: '100%', maxWidth: '480px' }}>
         {/* Header */}
-        <div className="text-center mb-8">
-          <Gamepad2 className="w-10 h-10 text-amber-600 mx-auto mb-3" />
-          <h1 className="text-2xl md:text-3xl font-medium text-stone-800">Play Together</h1>
-          <p className="text-stone-600 mt-2">
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div style={{ margin: '0 auto 0.75rem', width: '2.5rem', height: '2.5rem', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Gamepad2 size={40} color="#d97706" />
+          </div>
+          <h1 style={{ fontSize: '1.875rem', fontWeight: '500', color: '#1c1917', marginBottom: '0.5rem' }}>
+            Play Together
+          </h1>
+          <p style={{ color: '#44403c', fontSize: '1rem' }}>
             Therapeutic games for grief, connection, and quiet presence. No pressure. No performance.
           </p>
         </div>
 
         {/* Game List */}
-        <div className="space-y-4">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {games.map((game) => (
-            <Link key={game.id} href={game.href} legacyBehavior>
-              <a className="block">
-                <div className="p-4 bg-white rounded-xl border border-stone-200 shadow-sm hover:shadow-md transition cursor-pointer">
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 text-amber-600">{game.icon}</div>
-                      <div>
-                        <h3 className="font-semibold text-stone-800">{game.title}</h3>
-                        <p className="text-sm text-stone-600 mt-1">{game.description}</p>
-                      </div>
+            <Link key={game.id} href={game.href} legacyBehavior passHref>
+              <a
+                style={{
+                  display: 'block',
+                  padding: '1rem',
+                  backgroundColor: 'white',
+                  borderRadius: '0.75rem',
+                  border: '1px solid #e5e5e5',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                  cursor: 'pointer',
+                  transition: 'box-shadow 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                    <div style={{ marginTop: '0.125rem' }}>{game.icon}</div>
+                    <div>
+                      <h3 style={{ fontWeight: '600', color: '#1c1917', fontSize: '1rem' }}>{game.title}</h3>
+                      <p style={{ color: '#44403c', fontSize: '0.875rem', marginTop: '0.25rem' }}>{game.description}</p>
                     </div>
-                    <span className="flex items-center text-xs font-medium bg-green-100 text-green-800 px-2 py-1 rounded-full whitespace-nowrap">
-                      🟢 {game.players} playing
-                    </span>
                   </div>
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: '500',
+                      backgroundColor: '#dcfce7',
+                      color: '#047857',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '9999px',
+                      whiteSpace: 'nowrap',
+                      gap: '0.25rem',
+                    }}
+                  >
+                    <span style={{ width: '0.5rem', height: '0.5rem', backgroundColor: '#10b981', borderRadius: '50%', display: 'inline-block' }}></span>
+                    {game.players} playing
+                  </span>
                 </div>
               </a>
             </Link>
@@ -94,7 +138,7 @@ export default function GamesPage() {
         </div>
 
         {/* Footer Note */}
-        <div className="mt-10 text-center text-sm text-stone-500">
+        <div style={{ marginTop: '2.5rem', textAlign: 'center', fontSize: '0.875rem', color: '#78716c' }}>
           <p>New therapeutic games launch monthly. All are optional, anonymous, and designed with care.</p>
         </div>
       </div>

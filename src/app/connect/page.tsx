@@ -5,6 +5,105 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { Phone, X, MessageCircle, Clock, User } from 'lucide-react';
 
+// Shared base styles
+const styles = {
+  container: {
+    minHeight: '100vh',
+    background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+    padding: '1rem',
+  },
+  maxWidth: {
+    maxWidth: '56rem', // ~max-w-4xl
+    margin: '0 auto',
+  },
+  sectionGap: { marginBottom: '2rem' },
+  card: {
+    background: '#fff',
+    borderRadius: '0.75rem',
+    border: '1px solid #e5e5e5',
+    padding: '2rem',
+    textAlign: 'center' as const,
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '2rem',
+  },
+  title: {
+    fontSize: '1.875rem', // text-3xl
+    fontWeight: '700',
+    color: '#1c1917', // stone-800
+  },
+  subtitle: {
+    color: '#78716c', // stone-600
+    marginTop: '0.5rem',
+  },
+  button: {
+    background: '#d97706', // amber-500
+    color: '#fff',
+    fontWeight: '600',
+    padding: '0.75rem 2rem',
+    borderRadius: '9999px',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    transition: 'background 0.2s',
+  },
+  disabledButton: {
+    background: '#fbbf24', // amber-300
+    cursor: 'not-allowed',
+  },
+  iconButton: {
+    color: '#78716c',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '1.75rem',
+  },
+  userAvatar: {
+    width: '3rem',
+    height: '3rem',
+    borderRadius: '9999px',
+    background: '#fef3c7', // amber-100
+    border: '2px solid #fcd34d', // amber-300
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0 as const,
+  },
+  requestCard: {
+    background: '#fffbeb', // amber-50
+    border: '1px solid #fcd34d',
+    borderRadius: '0.75rem',
+    padding: '1.5rem',
+  },
+  hoverBg: { background: '#fffbeb' },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    gap: '1.5rem',
+  },
+  gridItem: {
+    textAlign: 'center' as const,
+    padding: '1rem',
+  },
+  avatarPlaceholder: {
+    width: '2.5rem',
+    height: '2.5rem',
+    borderRadius: '9999px',
+    background: '#fef3c7',
+    border: '1px solid #fcd34d',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: '0.25rem',
+    flexShrink: 0 as const,
+  },
+};
+
 export default function ConnectPage() {
   const [user, setUser] = useState<any>(null);
   const [activeRequest, setActiveRequest] = useState<any>(null);
@@ -27,7 +126,6 @@ export default function ConnectPage() {
           return;
         }
 
-        // Get current user profile
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('id, full_name, avatar_url')
@@ -36,27 +134,16 @@ export default function ConnectPage() {
 
         if (profileError) throw profileError;
         
-        if (isMounted) {
-          setUser(profile);
-        }
+        if (isMounted) setUser(profile);
 
-        // Fetch active requests first
         await fetchActiveRequests(session.user.id);
-        
-        // Then fetch available requests
         await fetchAvailableRequests(session.user.id);
-
-        // Setup realtime subscription for ALL relevant requests
         setupRealtimeSubscription(session.user.id);
       } catch (err) {
         console.error('Initialization error:', err);
-        if (isMounted) {
-          setError('Failed to load connection requests');
-        }
+        if (isMounted) setError('Failed to load connection requests');
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        if (isMounted) setIsLoading(false);
       }
     };
 
@@ -64,14 +151,12 @@ export default function ConnectPage() {
 
     return () => {
       isMounted = false;
-      // Cleanup subscriptions
       if (requestSubscriptionRef.current) {
         supabase.removeChannel(requestSubscriptionRef.current);
       }
     };
   }, []);
 
-  // Setup realtime subscription that handles both available requests and matched status changes
   const setupRealtimeSubscription = (userId: string) => {
     if (requestSubscriptionRef.current) {
       supabase.removeChannel(requestSubscriptionRef.current);
@@ -87,11 +172,9 @@ export default function ConnectPage() {
           table: 'quick_connect_requests'
         },
         async (payload) => {
-          // Prevent duplicate processing during redirect
           if (isRedirectingRef.current) return;
           
           try {
-            // Handle matched status for current user's request
             if (
               payload.eventType === 'UPDATE' && 
               payload.new.user_id === userId && 
@@ -103,7 +186,6 @@ export default function ConnectPage() {
               return;
             }
 
-            // Refetch data only if still on this page
             await fetchAvailableRequests(userId);
             await fetchActiveRequests(userId);
           } catch (err) {
@@ -117,103 +199,78 @@ export default function ConnectPage() {
   };
 
   const fetchActiveRequests = async (userId: string) => {
-  try {
-    // Step 1: Fetch the user's own active request
-    const { data, error } = await supabase
-      .from('quick_connect_requests')
-      .select('id, user_id, status, expires_at, created_at, room_id')
-      .eq('user_id', userId)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1);
+    try {
+      const { data, error } = await supabase
+        .from('quick_connect_requests')
+        .select('id, user_id, status, expires_at, created_at, room_id')
+        .eq('user_id', userId)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    const request = data?.[0];
-    if (!request) {
-      setActiveRequest(null);
-      return;
+      const request = data?.[0];
+      if (!request) {
+        setActiveRequest(null);
+        return;
+      }
+
+      if (request.status === 'matched' && request.room_id) {
+        isRedirectingRef.current = true;
+        router.push(`/room/${request.room_id}`);
+        return;
+      }
+
+      if (request.status !== 'available') {
+        setActiveRequest(null);
+        return;
+      }
+
+      setActiveRequest({
+        ...request,
+        user: {
+          full_name: user?.full_name || 'Anonymous',
+          avatar_url: user?.avatar_url || null
+        }
+      });
+    } catch (err) {
+      console.error('Error fetching active requests:', err);
+      throw err;
     }
+  };
 
-    // Handle matched status with room redirect
-    if (request.status === 'matched' && request.room_id) {
-      isRedirectingRef.current = true;
-      router.push(`/room/${request.room_id}`);
-      return;
-    }
-
-    // Only show if status is 'available'
-    if (request.status !== 'available') {
-      setActiveRequest(null);
-      return;
-    }
-
-    // Step 2: Fetch the requester's profile (which is the current user)
-    // We already have `user` in state, but to keep logic consistent and safe:
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, full_name, avatar_url')
-      .eq('id', userId)
-      .single();
-
-    if (profileError) {
-      console.warn('Could not load own profile in active request:', profileError);
-    }
-
-    const profile = profileData || { full_name: 'Anonymous', avatar_url: null };
-
-    // Step 3: Format and set active request
-    setActiveRequest({
-      ...request,
-      user: profile,
-    });
-  } catch (err) {
-    console.error('Error fetching active requests:', err);
-    throw err;
-  }
-};
   const fetchAvailableRequests = async (currentUserId: string) => {
-  try {
-    // Step 1: Get available requests
-    const { data: requests, error: reqError } = await supabase
-      .from('quick_connect_requests')
-      .select('id, created_at, user_id')
-      .eq('status', 'available')
-      .neq('user_id', currentUserId)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: true });
+    try {
+      const { data: requests, error: reqError } = await supabase
+        .from('quick_connect_requests')
+        .select('id, created_at, user_id')
+        .eq('status', 'available')
+        .neq('user_id', currentUserId)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: true });
 
-    if (reqError) throw reqError;
+      if (reqError) throw reqError;
 
-    // Step 2: Extract user IDs
-    const userIds = requests.map(r => r.user_id);
+      const userIds = requests.map(r => r.user_id);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds);
 
-    // Step 3: Fetch all profiles at once
-    const { data: profiles, error: profError } = await supabase
-      .from('profiles')
-      .select('id, full_name, avatar_url')
-      .in('id', userIds);
+      const profileMap = new Map((profiles || []).map(p => [p.id, p]));
 
-    if (profError) {
-      console.warn('Could not load some profiles:', profError);
+      const formattedRequests = requests.map(req => ({
+        ...req,
+        user: profileMap.get(req.user_id) || { full_name: 'Anonymous', avatar_url: null }
+      }));
+
+      setAvailableRequests(formattedRequests);
+    } catch (err) {
+      console.error('Error fetching available requests:', err);
+      throw err;
     }
-
-    // Step 4: Map profiles to requests
-    const profileMap = new Map(
-      (profiles || []).map(p => [p.id, p])
-    );
-
-    const formattedRequests = requests.map(req => ({
-      ...req,
-      user: profileMap.get(req.user_id) || { full_name: 'Anonymous', avatar_url: null }
-    }));
-
-    setAvailableRequests(formattedRequests);
-  } catch (err) {
-    console.error('Error fetching available requests:', err);
-    throw err;
-  }
-};
+  };
 
   const postRequest = async () => {
     if (!user || activeRequest || isPostingRequest || isRedirectingRef.current) return;
@@ -234,7 +291,6 @@ export default function ConnectPage() {
 
       if (error) throw error;
       
-      // Optimistically update UI
       setActiveRequest({
         id: Date.now().toString(),
         user_id: user.id,
@@ -247,7 +303,6 @@ export default function ConnectPage() {
         }
       });
       
-      // Refresh the subscription to include this new request
       setupRealtimeSubscription(user.id);
     } catch (err) {
       console.error('Failed to post request:', err);
@@ -261,11 +316,9 @@ export default function ConnectPage() {
     if (!user || isRedirectingRef.current) return;
   
     try {
-      // Generate unique room ID
       const roomId = `quick-connect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       
-      // First, verify the request exists and is available
-      const { data: existingRequest, error: verifyError } = await supabase
+      const { data: existingRequest } = await supabase
         .from('quick_connect_requests')
         .select('*')
         .eq('id', requestId)
@@ -273,53 +326,29 @@ export default function ConnectPage() {
         .gt('expires_at', new Date().toISOString())
         .single();
       
-      if (verifyError) {
-        throw new Error(`Request verification failed: ${verifyError.message}`);
-      }
-      
       if (!existingRequest) {
-        throw new Error('Request not found or no longer available');
+        setError('Request not found or no longer available');
+        return;
       }
       
-      // Update the request to matched status with room ID and acceptor ID
-      // ONLY using columns that exist in your schema:
-      // id, user_id, status, expires_at, created_at, room_id, acceptor_id
       const { error } = await supabase
         .from('quick_connect_requests')
         .update({
           status: 'matched',
           room_id: roomId,
-          acceptor_id: user.id // 👈 Record who accepted the request
+          acceptor_id: user.id
         })
         .eq('id', requestId)
         .eq('status', 'available');
       
-      if (error) {
-        console.error('Supabase update error:', error);
-        throw new Error(`Supabase update failed: ${error.message}`);
-      }
+      if (error) throw error;
       
-      console.log('Request successfully updated, redirecting to room:', roomId);
-      
-      // Redirect to room immediately
       isRedirectingRef.current = true;
       router.push(`/room/${roomId}`);
-      
     } catch (err) {
       console.error('Failed to accept request:', err);
       setError('Failed to accept request. Please try again.');
     }
-    
-    // 🚀 SCALABILITY NOTE:
-    // For future multi-participant rooms or group calls, consider:
-    // 1. Creating a dedicated `room_participants` table with:
-    //    - room_id (text)
-    //    - user_id (uuid)
-    //    - role (text: 'host', 'participant')
-    //    - joined_at (timestamptz)
-    // 2. Using a separate `rooms` table to manage room metadata
-    // 3. Implementing WebRTC signaling server for efficient peer connections
-    // This current implementation assumes 1:1 connections only.
   };
 
   const cancelRequest = async () => {
@@ -332,7 +361,6 @@ export default function ConnectPage() {
         .eq('id', activeRequest.id);
 
       if (error) throw error;
-      
       setActiveRequest(null);
     } catch (err) {
       console.error('Failed to cancel request:', err);
@@ -344,7 +372,6 @@ export default function ConnectPage() {
     const now = new Date();
     const posted = new Date(timestamp);
     const diff = Math.floor((now.getTime() - posted.getTime()) / 1000);
-    
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     return `${Math.floor(diff / 3600)}h ago`;
@@ -352,101 +379,143 @@ export default function ConnectPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-amber-50 to-stone-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto mb-4"></div>
-          <p className="text-stone-600">Finding connections...</p>
+      <div style={{ ...styles.container, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '3rem',
+            height: '3rem',
+            borderRadius: '9999px',
+            border: '4px solid transparent',
+            borderTopColor: '#d97706',
+            animation: 'spin 1s linear infinite',
+          }}></div>
+          <p style={{ color: '#78716c', marginTop: '1rem' }}>Finding connections...</p>
         </div>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-100 p-4">
+    <div style={styles.container}>
       {error && (
-        <div className="fixed top-4 right-4 max-w-sm p-4 bg-red-100 text-red-700 rounded-lg shadow-lg z-50">
+        <div style={{
+          position: 'fixed',
+          top: '1rem',
+          right: '1rem',
+          maxWidth: '24rem',
+          padding: '1rem',
+          background: '#fee2e2',
+          color: '#b91c1c',
+          borderRadius: '0.5rem',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+          zIndex: 50,
+        }}>
           {error}
         </div>
       )}
 
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
+      <div style={styles.maxWidth}>
+        <div style={styles.header}>
           <div>
-            <h1 className="text-3xl font-bold text-stone-800">Connect Now</h1>
-            <p className="text-stone-600 mt-2">
+            <h1 style={styles.title}>Connect Now</h1>
+            <p style={styles.subtitle}>
               Post a request when you need to talk, or accept someone else&apos;s request to connect immediately.
             </p>
           </div>
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="text-stone-600 hover:text-stone-900"
-          >
+          <button onClick={() => router.push('/dashboard')} style={styles.iconButton}>
             <X size={28} />
           </button>
         </div>
 
-        {/* Active Request Section */}
+        {/* Active Request */}
         {activeRequest ? (
-          <div className="bg-amber-50 rounded-xl border border-amber-200 p-6 mb-8 animate-fade-in">
-            <div className="flex items-start justify-between">
+          <div style={{ ...styles.requestCard, ...styles.sectionGap }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center border-2 border-amber-300 flex-shrink-0">
-                    {user.avatar_url ? (
-                      <img 
-                        src={user.avatar_url} 
-                        alt={user.full_name} 
-                        className="w-full h-full rounded-full object-cover"
-                      />
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <div style={styles.userAvatar}>
+                    {user?.avatar_url ? (
+                      <img src={user.avatar_url} alt={user.full_name} style={{ width: '100%', height: '100%', borderRadius: '9999px', objectFit: 'cover' }} />
                     ) : (
-                      <span className="text-amber-800 font-bold text-lg">
-                        {user.full_name?.charAt(0) || <User size={20} />}
+                      <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
+                        {user?.full_name?.charAt(0) || <User size={20} />}
                       </span>
                     )}
                   </div>
                   <div>
-                    <h2 className="font-bold text-stone-800">Your request is active</h2>
-                    <p className="text-stone-600">Waiting for someone to connect with you</p>
+                    <h2 style={{ fontWeight: '700', color: '#1c1917' }}>Your request is active</h2>
+                    <p style={{ color: '#78716c' }}>Waiting for someone to connect with you</p>
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-2 text-amber-700 bg-amber-100 rounded-full px-3 py-1 w-fit mt-2">
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  borderRadius: '9999px',
+                  padding: '0.25rem 0.75rem',
+                  width: 'fit-content',
+                  marginTop: '0.5rem',
+                }}>
                   <Clock size={16} />
-                  <span className="text-sm font-medium">
+                  <span style={{ fontSize: '0.875rem', fontWeight: '500' }}>
                     Expires in {Math.ceil((new Date(activeRequest.expires_at).getTime() - Date.now()) / 60000)} minutes
                   </span>
                 </div>
               </div>
-              
               <button
                 onClick={cancelRequest}
-                className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-full font-medium transition-colors"
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: '#e5e5e5',
+                  color: '#1c1917',
+                  borderRadius: '9999px',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
               >
                 Cancel Request
               </button>
             </div>
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-stone-200 p-8 mb-8 text-center animate-fade-in">
-            <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center border-2 border-amber-300 mx-auto mb-6">
-              <MessageCircle className="text-amber-600" size={32} />
+          <div style={{ ...styles.card, ...styles.sectionGap }}>
+            <div style={{ ...styles.userAvatar, width: '4rem', height: '4rem', margin: '0 auto 1.5rem' }}>
+              <MessageCircle size={32} style={{ color: '#d97706' }} />
             </div>
-            <h2 className="text-2xl font-bold text-stone-800 mb-3">I need to talk</h2>
-            <p className="text-stone-600 mb-6 max-w-md mx-auto">
+            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1c1917', marginBottom: '0.75rem' }}>
+              I need to talk
+            </h2>
+            <p style={{ color: '#78716c', marginBottom: '1.5rem', maxWidth: '32rem', margin: '0 auto' }}>
               Post a request to connect with someone from the community who&apos;s available to listen right now. Your request will be visible to others for 10 minutes.
             </p>
             <button
               onClick={postRequest}
               disabled={isPostingRequest || isRedirectingRef.current}
-              className={`${
-                isPostingRequest || isRedirectingRef.current
-                  ? 'bg-amber-300 cursor-not-allowed' 
-                  : 'bg-amber-500 hover:bg-amber-600'
-              } text-white font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 mx-auto transition-colors shadow-md`}
+              style={{
+                ...styles.button,
+                ...(isPostingRequest || isRedirectingRef.current ? styles.disabledButton : {}),
+                margin: '0 auto',
+                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+              }}
             >
               {isPostingRequest ? (
                 <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                  <div style={{
+                    width: '1.25rem',
+                    height: '1.25rem',
+                    borderRadius: '9999px',
+                    border: '2px solid transparent',
+                    borderTopColor: '#fff',
+                    animation: 'spin 1s linear infinite',
+                    marginRight: '0.5rem',
+                  }}></div>
                   Creating request...
                 </>
               ) : (
@@ -459,95 +528,90 @@ export default function ConnectPage() {
           </div>
         )}
 
-        {/* Available Requests Section */}
-        <div className="bg-white rounded-xl border border-stone-200 overflow-hidden mb-8 animate-fade-in">
-          <div className="p-5 border-b border-stone-100 bg-stone-50">
-            <h2 className="text-xl font-bold text-stone-800">Available Connections</h2>
-            <p className="text-stone-600 mt-1">
-              {availableRequests.length > 0 
-                ? 'Someone in the community needs to talk right now' 
+        {/* Available Requests */}
+        <div style={{ ...styles.card, ...styles.sectionGap, padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '1.25rem', borderBottom: '1px solid #f4f4f5', background: '#fafafa' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917' }}>Available Connections</h2>
+            <p style={{ color: '#78716c', marginTop: '0.25rem' }}>
+              {availableRequests.length > 0
+                ? 'Someone in the community needs to talk right now'
                 : 'No active requests at the moment. Check back later or post your own request.'}
             </p>
           </div>
-          
+
           {availableRequests.length > 0 ? (
-            <div className="divide-y divide-stone-100">
+            <div style={{}}>
               {availableRequests.map((request) => (
-                <div 
-                  key={request.id} 
-                  className="p-5 hover:bg-amber-50 transition-colors cursor-pointer group"
+                <div
+                  key={request.id}
                   onClick={() => !isRedirectingRef.current && acceptRequest(request.id)}
+                  style={{
+                    padding: '1.25rem',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#fffbeb')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = '')}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-full bg-amber-100 flex-shrink-0 flex items-center justify-center border border-amber-200 overflow-hidden mt-1">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                      <div style={styles.avatarPlaceholder}>
                         {request.user.avatar_url ? (
-                          <img 
-                            src={request.user.avatar_url} 
-                            alt={request.user.full_name} 
-                            className="w-full h-full object-cover rounded-full"
-                          />
+                          <img src={request.user.avatar_url} alt={request.user.full_name} style={{ width: '100%', height: '100%', borderRadius: '9999px', objectFit: 'cover' }} />
                         ) : (
-                          <span className="text-amber-800 font-medium">
+                          <span style={{ color: '#92400e', fontWeight: '600' }}>
                             {request.user.full_name?.charAt(0) || <User size={20} />}
                           </span>
                         )}
                       </div>
                       <div>
-                        <h3 className="font-medium text-stone-800">{request.user.full_name}</h3>
-                        <p className="text-stone-600 text-sm mt-0.5">Needs to talk • {timeAgo(request.created_at)}</p>
+                        <h3 style={{ fontWeight: '600', color: '#1c1917' }}>{request.user.full_name}</h3>
+                        <p style={{ color: '#78716c', fontSize: '0.875rem', marginTop: '0.125rem' }}>
+                          Needs to talk • {timeAgo(request.created_at)}
+                        </p>
                       </div>
                     </div>
-                    
-                    <div className="flex items-center">
-                      <div className="bg-amber-100 text-amber-800 rounded-full px-3 py-1 text-sm font-medium hidden group-hover:block">
-                        Accept Request
-                      </div>
-                      <Phone className="text-amber-500 ml-3 group-hover:scale-110 transition-transform" size={24} />
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <Phone size={24} style={{ color: '#d97706', marginLeft: '0.75rem', transition: 'transform 0.2s' }} />
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="p-12 text-center text-stone-500">
-              <div className="flex justify-center mb-4">
-                <div className="w-12 h-12 rounded-full bg-stone-100 flex items-center justify-center">
-                  <MessageCircle className="text-stone-400" size={24} />
-                </div>
+            <div style={{ padding: '3rem', textAlign: 'center', color: '#a8a29e' }}>
+              <div style={{ ...styles.avatarPlaceholder, width: '3rem', height: '3rem', margin: '0 auto 1rem' }}>
+                <MessageCircle size={24} style={{ color: '#d6d3d1' }} />
               </div>
               <p>No one is requesting a connection right now</p>
             </div>
           )}
         </div>
 
-        {/* How it Works Section */}
-        <div className="bg-white rounded-xl border border-stone-200 p-6 animate-fade-in">
-          <h2 className="text-xl font-bold text-stone-800 mb-4">How It Works</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="text-center p-4">
-              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
-                <Phone className="text-amber-600" size={24} />
+        {/* How It Works */}
+        <div style={{ ...styles.card, ...styles.sectionGap }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917', marginBottom: '1rem' }}>
+            How It Works
+          </h2>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(1, 1fr)',
+            gap: '1.5rem',
+            ...(typeof window !== 'undefined' && window.innerWidth >= 768 ? { gridTemplateColumns: 'repeat(3, 1fr)' } : {}),
+          }}>
+            {[
+              { icon: <Phone size={24} />, title: 'Post Request', desc: 'Click "I need to talk" to let others know you\'re available' },
+              { icon: <User size={24} />, title: 'Get Matched', desc: 'When someone accepts your request, you\'ll both be connected instantly' },
+              { icon: <Clock size={24} />, title: '10 Minute Window', desc: 'Requests automatically expire after 10 minutes to keep connections fresh' }
+            ].map((item, i) => (
+              <div key={i} style={styles.gridItem}>
+                <div style={{ ...styles.avatarPlaceholder, width: '3rem', height: '3rem', margin: '0 auto 0.75rem' }}>
+                  {item.icon}
+                </div>
+                <h3 style={{ fontWeight: '600', color: '#1c1917' }}>{item.title}</h3>
+                <p style={{ color: '#78716c', fontSize: '0.875rem', marginTop: '0.25rem' }}>{item.desc}</p>
               </div>
-              <h3 className="font-medium text-stone-800">Post Request</h3>
-              <p className="text-stone-600 mt-1 text-sm">Click &quot;I need to talk&quot; to let others know you&apos;re available</p>
-            </div>
-            
-            <div className="text-center p-4 border-l border-stone-200 md:border-l-0 md:border-t md:border-stone-200">
-              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
-                <User className="text-amber-600" size={24} />
-              </div>
-              <h3 className="font-medium text-stone-800">Get Matched</h3>
-              <p className="text-stone-600 mt-1 text-sm">When someone accepts your request, you&apos;ll both be connected instantly</p>
-            </div>
-            
-            <div className="text-center p-4 border-l border-stone-200 md:border-l-0">
-              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
-                <Clock className="text-amber-600" size={24} />
-              </div>
-              <h3 className="font-medium text-stone-800">10 Minute Window</h3>
-              <p className="text-stone-600 mt-1 text-sm">Requests automatically expire after 10 minutes to keep connections fresh</p>
-            </div>
+            ))}
           </div>
         </div>
       </div>

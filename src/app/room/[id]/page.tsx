@@ -1,4 +1,4 @@
-// app/room/[id]/page.tsx — FULL UPDATED VERSION (with empty alert box removed)
+// app/room/[id]/page.tsx
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
@@ -140,7 +140,6 @@ export default function RoomPage() {
           .on('broadcast', { event: 'call_ended' }, (payload) => {
             console.log('Received call_ended signal from peer');
             setCallEndedByPeer(true);
-            // We'll handle disconnection in the main effect below
           })
           .subscribe();
 
@@ -253,14 +252,12 @@ export default function RoomPage() {
 
     try {
       if (endedByUser) {
-        // Broadcast that this user is ending the call
         await supabaseChannelRef.current?.send({
           type: 'broadcast',
           event: 'call_ended',
           payload: { by: authUser?.id },
         });
 
-        // Update DB status to 'completed'
         await supabase
           .from('quick_connect_requests')
           .update({ status: 'completed' })
@@ -297,31 +294,89 @@ export default function RoomPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Loading
+  // === Loading State ===
   if (authLoading || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-amber-50 to-stone-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto mb-4"></div>
-          <p className="text-stone-600">Joining room...</p>
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '3rem',
+            height: '3rem',
+            borderRadius: '50%',
+            border: '4px solid transparent',
+            borderTopColor: '#f59e0b',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 1rem',
+          }}></div>
+          <p style={{ color: '#78716c' }}>Joining room...</p>
         </div>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
 
-  // Error
+  // === Error State ===
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-amber-50 to-stone-100 p-4">
-        <div className="bg-white rounded-xl border border-stone-200 p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="text-red-500" size={32} />
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+        padding: '1rem',
+      }}>
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '2rem',
+          maxWidth: '32rem',
+          width: '100%',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            width: '4rem',
+            height: '4rem',
+            borderRadius: '9999px',
+            backgroundColor: '#fee2e2',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <AlertTriangle size={32} style={{ color: '#ef4444' }} />
           </div>
-          <h2 className="text-2xl font-bold text-stone-800 mb-3">Connection Issue</h2>
-          <p className="text-stone-600 mb-6">{error}</p>
+          <h2 style={{
+            fontSize: '1.5rem',
+            fontWeight: '700',
+            color: '#1c1917',
+            marginBottom: '0.75rem',
+          }}>Connection Issue</h2>
+          <p style={{ color: '#44403c', marginBottom: '1.5rem' }}>{error}</p>
           <button
             onClick={() => router.push('/connect')}
-            className="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-6 rounded-full transition-colors"
+            style={{
+              backgroundColor: '#f59e0b',
+              color: 'white',
+              fontWeight: '700',
+              padding: '0.75rem 1.5rem',
+              borderRadius: '9999px',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#d97706')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#f59e0b')}
           >
             Return to Connections
           </button>
@@ -330,48 +385,101 @@ export default function RoomPage() {
     );
   }
 
-  // Main UI
+  // === Main UI ===
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-100 p-4 pt-[80px]">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+      padding: '1rem',
+      paddingTop: '5rem',
+    }}>
+      <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
           <div>
-            <h1 className="text-2xl font-bold text-stone-800">Audio Call</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="flex -space-x-2">
+            <h1 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1c1917' }}>Audio Call</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <div style={{ display: 'flex', gap: '0.25rem' }}>
                 {participants.map((p) => (
                   <div
                     key={p.id}
-                    className={`w-10 h-10 rounded-full border-2 ${
-                      p.id === user?.id ? 'border-amber-400' : 'border-stone-200'
-                    } bg-stone-200 flex items-center justify-center overflow-hidden`}
+                    style={{
+                      width: '2.5rem',
+                      height: '2.5rem',
+                      borderRadius: '9999px',
+                      border: p.id === user?.id ? '2px solid #f59e0b' : '2px solid #d6d3d1',
+                      backgroundColor: '#e5e5e4',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                    }}
                   >
                     {p.avatar ? (
-                      <img src={p.avatar} alt={p.name} className="w-full h-full object-cover" />
+                      <img
+                        src={p.avatar}
+                        alt={p.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
                     ) : (
-                      <span className="text-stone-700 font-medium">{p.name.charAt(0)}</span>
+                      <span style={{ color: '#44403c', fontWeight: '600', fontSize: '1rem' }}>
+                        {p.name.charAt(0)}
+                      </span>
                     )}
                   </div>
                 ))}
               </div>
-              <span className="text-stone-600">{participants.length} participant{participants.length !== 1 ? 's' : ''}</span>
+              <span style={{ color: '#78716c', fontSize: '0.875rem' }}>
+                {participants.length} participant{participants.length !== 1 ? 's' : ''}
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1 bg-amber-100 text-amber-800 rounded-full px-3 py-1">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              backgroundColor: '#fef3c7',
+              color: '#92400e',
+              borderRadius: '9999px',
+              padding: '0.25rem 0.75rem',
+            }}>
               <Clock size={16} />
-              <span className="font-medium">{formatDuration(callDuration)}</span>
+              <span style={{ fontWeight: '600', fontSize: '0.875rem' }}>{formatDuration(callDuration)}</span>
             </div>
             <button
               onClick={() => leaveRoom(true)}
               disabled={isLeaving}
-              className={`${
-                isLeaving ? 'bg-stone-200 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'
-              } text-white font-bold py-2 px-4 rounded-full flex items-center gap-2 transition-colors`}
+              style={{
+                backgroundColor: isLeaving ? '#d6d3d1' : '#ef4444',
+                color: 'white',
+                fontWeight: '700',
+                padding: '0.5rem 1rem',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: isLeaving ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+              onMouseEnter={(e) => {
+                if (!isLeaving) e.currentTarget.style.backgroundColor = isLeaving ? '#d6d3d1' : '#dc2626';
+              }}
+              onMouseLeave={(e) => {
+                if (!isLeaving) e.currentTarget.style.backgroundColor = '#ef4444';
+              }}
             >
               {isLeaving ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <div style={{
+                  width: '1rem',
+                  height: '1rem',
+                  borderRadius: '50%',
+                  border: '2px solid transparent',
+                  borderTopColor: 'white',
+                  animation: 'spin 1s linear infinite',
+                }}></div>
               ) : (
                 <PhoneOff size={18} />
               )}
@@ -380,43 +488,98 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-stone-200 p-8 mb-6 text-center">
-          <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
-            <UserIcon className="text-amber-600" size={40} />
+        {/* Call Status Card */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '2rem',
+          textAlign: 'center',
+          marginBottom: '1.5rem',
+        }}>
+          <div style={{
+            width: '5rem',
+            height: '5rem',
+            borderRadius: '9999px',
+            backgroundColor: '#fef3c7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <UserIcon size={40} style={{ color: '#d97706' }} />
           </div>
-          <h2 className="text-xl font-bold text-stone-800 mb-2">
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
             {isInCall ? 'Call in Progress' : 'Connecting...'}
           </h2>
-          <p className="text-stone-600 mb-4">
+          <p style={{ color: '#44403c' }}>
             {remoteMuted ? 'Other participant muted' : 'Listening...'}
           </p>
-          {/* Status badge intentionally omitted */}
         </div>
 
-        <div className="bg-white rounded-xl border border-stone-200 p-6 mb-6">
-          <h2 className="text-xl font-bold text-stone-800 mb-4">Participants</h2>
-          <div className="space-y-4">
+        {/* Participants */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+        }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917', marginBottom: '1rem' }}>Participants</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {participants.map((p) => (
               <div
                 key={p.id}
-                className={`flex items-center gap-3 p-3 rounded-lg ${
-                  p.id === user?.id ? 'bg-amber-50' : 'hover:bg-stone-50'
-                }`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  backgroundColor: p.id === user?.id ? '#fffbeb' : 'transparent',
+                }}
               >
                 <div
-                  className={`w-12 h-12 rounded-full ${
-                    p.id === user?.id ? 'border-2 border-amber-400' : 'border border-stone-200'
-                  } bg-stone-200 flex items-center justify-center overflow-hidden flex-shrink-0`}
+                  style={{
+                    width: '3rem',
+                    height: '3rem',
+                    borderRadius: '9999px',
+                    border: p.id === user?.id ? '2px solid #f59e0b' : '1px solid #d6d3d1',
+                    backgroundColor: '#e5e5e4',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    overflow: 'hidden',
+                  }}
                 >
                   {p.avatar ? (
-                    <img src={p.avatar} alt={p.name} className="w-full h-full object-cover rounded-full" />
+                    <img
+                      src={p.avatar}
+                      alt={p.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '9999px' }}
+                    />
                   ) : (
-                    <span className="text-stone-700 font-medium text-lg">{p.name.charAt(0)}</span>
+                    <span style={{ color: '#44403c', fontWeight: '600', fontSize: '1.125rem' }}>
+                      {p.name.charAt(0)}
+                    </span>
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-stone-800 truncate">{p.name}</h3>
-                  <p className={`text-xs font-medium ${p.id === user?.id ? 'text-amber-600' : 'text-green-500'}`}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h3 style={{ fontWeight: '600', color: '#1c1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {p.name}
+                  </h3>
+                  <p style={{
+                    fontSize: '0.75rem',
+                    fontWeight: '600',
+                    color: p.id === user?.id
+                      ? '#d97706'
+                      : callEndedByPeer
+                      ? '#64748b'
+                      : remoteMuted
+                      ? '#64748b'
+                      : '#16a34a',
+                  }}>
                     {p.id === user?.id
                       ? 'You'
                       : callEndedByPeer
@@ -431,22 +594,45 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-stone-200 p-6 mb-6">
-          <h3 className="font-bold text-stone-800 mb-4">Audio Control</h3>
-          <div className="flex justify-center">
+        {/* Audio Control */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+        }}>
+          <h3 style={{ fontWeight: '700', color: '#1c1917', marginBottom: '1rem' }}>Audio Control</h3>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
             <button
               onClick={toggleAudio}
               disabled={!isInCall || callEndedByPeer}
-              className={`p-4 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors ${
-                !isInCall || callEndedByPeer
-                  ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
+              style={{
+                padding: '1rem',
+                borderRadius: '0.75rem',
+                border: 'none',
+                cursor: !isInCall || callEndedByPeer ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                backgroundColor: !isInCall || callEndedByPeer
+                  ? '#f5f5f4'
                   : isAudioEnabled
-                  ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                  : 'bg-stone-100 text-stone-500 hover:bg-stone-200'
-              }`}
+                  ? '#dbeafe'
+                  : '#f5f5f4',
+                color: !isInCall || callEndedByPeer
+                  ? '#a8a29e'
+                  : isAudioEnabled
+                  ? '#1e40af'
+                  : '#64748b',
+              }}
             >
               {isAudioEnabled ? <Mic size={28} /> : <MicOff size={28} />}
-              <span className="text-sm font-medium">{isAudioEnabled ? 'Mute' : 'Unmute'}</span>
+              <span style={{ fontSize: '0.875rem', fontWeight: '600' }}>
+                {isAudioEnabled ? 'Mute' : 'Unmute'}
+              </span>
             </button>
           </div>
         </div>

@@ -2,10 +2,8 @@
 'use client';
 
 import Link from 'next/link';
-import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { ArrowRightIcon } from '@heroicons/react/24/outline';
 import { Users, Dot, BookOpen } from 'lucide-react';
+import { ArrowRightIcon } from '@heroicons/react/24/outline';
 
 export type ResourceType = 'Guide' | 'Story' | 'Video' | 'Tool' | 'Book';
 
@@ -15,10 +13,10 @@ interface ResourceCardProps {
   excerpt: string;
   type: ResourceType;
   featured?: boolean;
-  author?: string; // optional author (for books/guides)
-  liveViewers?: number; // for Videos: how many are watching
-  communitySource?: string; // e.g., "Loss of a Parent"
-  sharedAgo?: string; // e.g., "2h ago"
+  author?: string;
+  liveViewers?: number;
+  communitySource?: string;
+  sharedAgo?: string;
 }
 
 const actionTextMap: Record<ResourceType, string> = {
@@ -29,12 +27,12 @@ const actionTextMap: Record<ResourceType, string> = {
   Book: 'Read excerpt',
 };
 
-const typeColorMap: Record<ResourceType, string> = {
-  Guide: 'bg-blue-100 text-blue-800',
-  Story: 'bg-amber-100 text-amber-800',
-  Video: 'bg-purple-100 text-purple-800',
-  Tool: 'bg-emerald-100 text-emerald-800',
-  Book: 'bg-rose-100 text-rose-800',
+const typeColorMap: Record<ResourceType, { bg: string; text: string }> = {
+  Guide: { bg: '#dbeafe', text: '#1e40af' },
+  Story: { bg: '#fef3c7', text: '#92400e' },
+  Video: { bg: '#ede9fe', text: '#7c3aed' },
+  Tool: { bg: '#dcfce7', text: '#047857' },
+  Book: { bg: '#fce7f3', text: '#be185d' },
 };
 
 export default function ResourceCard({
@@ -48,55 +46,107 @@ export default function ResourceCard({
   communitySource,
   sharedAgo,
 }: ResourceCardProps) {
-  const cardClasses = featured
-    ? 'border-l-4 border-amber-500 bg-white shadow-sm hover:shadow-md transition-shadow'
-    : 'bg-white border border-stone-200 shadow-sm hover:shadow transition-shadow';
+  // Base card style
+  const baseCardStyle: React.CSSProperties = {
+    backgroundColor: 'white',
+    padding: 0,
+    borderRadius: '0.5rem',
+    transition: 'box-shadow 0.2s ease',
+    border: featured ? 'none' : '1px solid #e5e5e5',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+    position: 'relative',
+  };
+
+  // Featured: add left accent border
+  const cardStyle: React.CSSProperties = featured
+    ? { ...baseCardStyle, borderLeft: '4px solid #f59e0b' }
+    : baseCardStyle;
+
+  const badgeStyle = typeColorMap[type];
 
   return (
-    <Card className={cardClasses}>
-      <CardContent className="p-4">
-        <div className="flex justify-between items-start mb-2">
-          <h3 className="text-lg font-semibold text-stone-800 leading-tight">{title}</h3>
-          <Badge className={`${typeColorMap[type]} px-2 py-1 text-xs font-medium rounded-full`}>
+    <div
+      style={cardStyle}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = featured
+          ? '0 4px 8px rgba(0,0,0,0.1)'
+          : '0 4px 6px rgba(0,0,0,0.1)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+      }}
+    >
+      <div style={{ padding: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+          <h3 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1c1917', lineHeight: '1.3' }}>{title}</h3>
+          <span
+            style={{
+              backgroundColor: badgeStyle.bg,
+              color: badgeStyle.text,
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.75rem',
+              borderRadius: '9999px',
+              fontWeight: '500',
+            }}
+          >
             {type}
-          </Badge>
+          </span>
         </div>
-        <p className="text-stone-600 text-sm mb-2">{excerpt}</p>
+        <p style={{ color: '#44403c', fontSize: '0.875rem', marginBottom: '0.5rem' }}>{excerpt}</p>
 
-        {/* Author (for book-like content) */}
+        {/* Author (for books) */}
         {author && (
-          <p className="text-xs text-stone-500 mt-1 flex items-center">
-            <BookOpen className="w-3 h-3 mr-1 inline" />
+          <p style={{ color: '#78716c', fontSize: '0.75rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
+            <BookOpen size={12} style={{ marginRight: '0.25rem' }} />
             {author}
           </p>
         )}
 
-        {/* Live or community context */}
+        {/* Community or live info */}
         {(liveViewers || communitySource) && (
-          <div className="text-xs text-stone-500 mt-1 flex items-center">
+          <div style={{ color: '#78716c', fontSize: '0.75rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
             {liveViewers ? (
               <>
-                <Dot className="text-red-500 fill-current h-3 w-3 mr-1" />
+                <Dot size={12} style={{ color: '#ef4444', fill: '#ef4444', marginRight: '0.25rem' }} />
                 {liveViewers} watching now
               </>
             ) : communitySource ? (
               <>
-                <Users className="w-3 h-3 mr-1" />
-                Shared in <span className="font-medium ml-1">{communitySource}</span> • {sharedAgo}
+                <Users size={12} style={{ marginRight: '0.25rem' }} />
+                Shared in <span style={{ fontWeight: '600', marginLeft: '0.25rem' }}>{communitySource}</span> • {sharedAgo}
               </>
             ) : null}
           </div>
         )}
-      </CardContent>
-      <CardFooter className="px-4 pb-3 pt-0">
-        <Link
-          href={`/resources/${id}`}
-          className="inline-flex items-center text-amber-600 hover:text-amber-800 text-sm font-medium group"
-        >
-          {actionTextMap[type]}
-          <ArrowRightIcon className="ml-1 w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+      </div>
+
+      {/* Footer with link */}
+      <div style={{ padding: '0 1rem 0.75rem 1rem' }}>
+        <Link href={`/resources/${id}`} style={{ display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>
+          <span
+            style={{
+              color: '#d97706',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              transition: 'color 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#92400e')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#d97706')}
+          >
+            {actionTextMap[type]}
+          </span>
+          <ArrowRightIcon
+            style={{
+              marginLeft: '0.25rem',
+              width: '1rem',
+              height: '1rem',
+              transition: 'transform 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateX(2px)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateX(0)')}
+          />
         </Link>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   );
 }
