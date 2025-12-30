@@ -1,10 +1,8 @@
-﻿// src/app/schedule/page.tsx
+﻿﻿// src/app/schedule/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Users, Clock, Calendar } from 'lucide-react';
 
 // Types
@@ -90,13 +88,13 @@ const mockEvents: Event[] = [
   },
 ];
 
-// Type colors
-const typeColorMap: Record<EventType, string> = {
-  'Community Circle': 'bg-amber-100 text-amber-800',
-  'Workshop': 'bg-blue-100 text-blue-800',
-  'Author Talk': 'bg-rose-100 text-rose-800',
-  'Ritual': 'bg-purple-100 text-purple-800',
-  'Drop-in Room': 'bg-stone-100 text-stone-800',
+// Type color map (for badge background/text)
+const typeColorMap: Record<EventType, { bg: string; text: string }> = {
+  'Community Circle': { bg: '#fef3c7', text: '#92400e' },
+  'Workshop': { bg: '#dbeafe', text: '#1e40af' },
+  'Author Talk': { bg: '#fce7f3', text: '#be185d' },
+  'Ritual': { bg: '#ede9fe', text: '#7c3aed' },
+  'Drop-in Room': { bg: '#f5f5f4', text: '#44403c' },
 };
 
 // Helpers
@@ -114,7 +112,6 @@ export default function SchedulePage() {
   const [alwaysOpen, setAlwaysOpen] = useState<Event[]>([]);
 
   useEffect(() => {
-    // In real app: fetch from API or WebSocket
     setLiveEvents(mockEvents.filter(e => e.isLive && !e.isAlwaysOpen));
     setAlwaysOpen(mockEvents.filter(e => e.isAlwaysOpen));
     setUpcomingEvents(
@@ -125,73 +122,147 @@ export default function SchedulePage() {
   const renderEventCard = (event: Event) => {
     const isUpcoming = event.startTime && !event.isLive;
     const startsIn = isUpcoming ? minutesUntil(event.startTime!) : null;
+    const badgeStyle = typeColorMap[event.type];
+
+    const joinButtonStyle = {
+      width: '100%',
+      padding: '0.5rem',
+      borderRadius: '0.5rem',
+      fontWeight: '600' as const,
+      transition: 'background-color 0.2s',
+      cursor: 'pointer',
+      ...(event.isLive || event.isAlwaysOpen
+        ? { backgroundColor: '#f59e0b', color: 'white' }
+        : { backgroundColor: '#f5f5f4', color: '#44403c' }),
+    };
 
     return (
-      <Card key={event.id} className="bg-white border border-stone-200 shadow-sm hover:shadow transition-shadow">
-        <CardContent className="p-4">
-          <div className="flex justify-between items-start mb-2">
-            <h3 className="font-semibold text-stone-800">{event.title}</h3>
-            <Badge className={`${typeColorMap[event.type]} px-2 py-1 text-xs rounded-full`}>
+      <div
+        key={event.id}
+        style={{
+          backgroundColor: 'white',
+          border: '1px solid #e5e5e5',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          transition: 'box-shadow 0.2s',
+          borderRadius: '0.5rem',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)')}
+        onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)')}
+      >
+        <div style={{ padding: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+            <h3 style={{ fontWeight: '600', color: '#1c1917', fontSize: '1rem' }}>{event.title}</h3>
+            <span
+              style={{
+                backgroundColor: badgeStyle.bg,
+                color: badgeStyle.text,
+                padding: '0.25rem 0.5rem',
+                fontSize: '0.75rem',
+                borderRadius: '9999px',
+                fontWeight: '500',
+              }}
+            >
               {event.type}
-            </Badge>
+            </span>
           </div>
-          <p className="text-stone-600 text-sm mb-3">{event.description}</p>
+          <p style={{ color: '#44403c', fontSize: '0.875rem', marginBottom: '0.75rem' }}>{event.description}</p>
 
           {event.host && (
-            <p className="text-xs text-stone-500 mb-2">Hosted by {event.host}</p>
+            <p style={{ color: '#78716c', fontSize: '0.75rem', marginBottom: '0.5rem' }}>Hosted by {event.host}</p>
           )}
 
-          <div className="flex items-center text-sm text-stone-500 mb-3">
-            <Users className="w-3 h-3 mr-1" />
+          <div style={{ display: 'flex', alignItems: 'center', color: '#78716c', fontSize: '0.875rem', marginBottom: '0.75rem' }}>
+            <Users size={12} style={{ marginRight: '0.25rem' }} />
             {event.attendees} {event.attendees === 1 ? 'person' : 'people'} inside
           </div>
 
           {isUpcoming && (
-            <div className="flex items-center text-xs text-stone-500 mb-3">
-              <Clock className="w-3 h-3 mr-1" />
+            <div style={{ display: 'flex', alignItems: 'center', color: '#78716c', fontSize: '0.75rem', marginBottom: '0.75rem' }}>
+              <Clock size={12} style={{ marginRight: '0.25rem' }} />
               Starts at {formatTime(event.startTime!)} ({startsIn} min)
             </div>
           )}
 
           <button
             onClick={() => alert(`Joining: ${event.title}`)}
-            className={`w-full py-2 rounded-lg font-medium transition ${
-              event.isLive || event.isAlwaysOpen
-                ? 'bg-amber-500 text-white hover:bg-amber-600'
-                : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-            }`}
+            style={joinButtonStyle}
+            onMouseEnter={(e) => {
+              if (event.isLive || event.isAlwaysOpen) {
+                e.currentTarget.style.backgroundColor = '#d97706';
+              } else {
+                e.currentTarget.style.backgroundColor = '#e5e5e4';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (event.isLive || event.isAlwaysOpen) {
+                e.currentTarget.style.backgroundColor = '#f59e0b';
+              } else {
+                e.currentTarget.style.backgroundColor = '#f5f5f4';
+              }
+            }}
           >
             {event.isLive || event.isAlwaysOpen ? 'Join Now' : `Join in ${startsIn} min`}
           </button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   };
 
+  // Common section header style
+  const sectionHeaderStyle: React.CSSProperties = {
+    fontSize: '1.25rem',
+    fontWeight: '600',
+    color: '#1c1917',
+    marginBottom: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+  };
+
   return (
-    <div className="min-h-screen bg-stone-50 py-8 px-4 sm:px-6">
-      <div className="max-w-4xl mx-auto">
+    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f4', padding: '2rem 1rem' }}>
+      <div style={{ maxWidth: '896px', margin: '0 auto' }}>
         {/* Header */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-100 text-amber-700 mb-3">
+        <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+          <div
+            style={{
+              width: '3rem',
+              height: '3rem',
+              borderRadius: '9999px',
+              backgroundColor: '#fef3c7',
+              color: '#92400e',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 0.75rem',
+            }}
+          >
             <Calendar size={20} />
           </div>
-          <h1 className="text-3xl font-serif font-bold text-stone-800 mb-2">
+          <h1 style={{ fontSize: '1.875rem', fontFamily: 'serif', fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
             Gather With Others
           </h1>
-          <p className="text-stone-600 max-w-2xl mx-auto">
+          <p style={{ color: '#44403c', maxWidth: '42rem', margin: '0 auto' }}>
             Real conversations happening now — and always a quiet space waiting for you.
           </p>
         </div>
 
         {/* Live Now */}
         {liveEvents.length > 0 && (
-          <section className="mb-12">
-            <h2 className="text-xl font-semibold text-stone-800 mb-4 flex items-center">
-              <span className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse"></span>
+          <section style={{ marginBottom: '3rem' }}>
+            <h2 style={sectionHeaderStyle}>
+              <span
+                style={{
+                  width: '0.5rem',
+                  height: '0.5rem',
+                  backgroundColor: '#ef4444',
+                  borderRadius: '50%',
+                  marginRight: '0.5rem',
+                  animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                }}
+              ></span>
               Live Now
             </h2>
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {liveEvents.map(renderEventCard)}
             </div>
           </section>
@@ -199,12 +270,12 @@ export default function SchedulePage() {
 
         {/* Always Open */}
         {alwaysOpen.length > 0 && (
-          <section className="mb-12">
-            <h2 className="text-xl font-semibold text-stone-800 mb-4 flex items-center">
-              <span className="w-8 h-px bg-stone-300 mr-3"></span>
+          <section style={{ marginBottom: '3rem' }}>
+            <h2 style={sectionHeaderStyle}>
+              <span style={{ width: '2rem', height: '1px', backgroundColor: '#a8a29e', marginRight: '0.75rem' }}></span>
               Always Open
             </h2>
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {alwaysOpen.map(renderEventCard)}
             </div>
           </section>
@@ -213,23 +284,30 @@ export default function SchedulePage() {
         {/* Starting Soon */}
         {upcomingEvents.length > 0 && (
           <section>
-            <h2 className="text-xl font-semibold text-stone-800 mb-4 flex items-center">
-              <Clock className="w-4 h-4 mr-2 text-stone-500" />
+            <h2 style={sectionHeaderStyle}>
+              <Clock size={16} style={{ marginRight: '0.5rem', color: '#78716c' }} />
               Starting Soon
             </h2>
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {upcomingEvents.map(renderEventCard)}
             </div>
           </section>
         )}
 
-        {/* Empty State (unlikely, but safe) */}
+        {/* Empty State */}
         {liveEvents.length === 0 && alwaysOpen.length === 0 && upcomingEvents.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-stone-600 mb-4">No scheduled events right now.</p>
+          <div style={{ textAlign: 'center', paddingTop: '3rem', paddingBottom: '3rem' }}>
+            <p style={{ color: '#44403c', marginBottom: '1rem' }}>No scheduled events right now.</p>
             <button
               onClick={() => alert('Create a group call')}
-              className="text-amber-600 font-medium hover:underline"
+              style={{
+                color: '#d97706',
+                fontWeight: '500',
+                textDecoration: 'underline',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
             >
               Start a group call →
             </button>
@@ -237,16 +315,32 @@ export default function SchedulePage() {
         )}
 
         {/* Footer CTA */}
-        <footer className="mt-12 text-center text-stone-500 text-sm">
+        <footer style={{ marginTop: '3rem', textAlign: 'center', color: '#78716c', fontSize: '0.875rem' }}>
           <p>All spaces are held with care. Come as you are.</p>
           <button
             onClick={() => alert('Create your own event')}
-            className="text-amber-600 hover:underline mt-1"
+            style={{
+              color: '#d97706',
+              fontWeight: '500',
+              textDecoration: 'underline',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              marginTop: '0.25rem',
+            }}
           >
             Host a circle
           </button>
         </footer>
       </div>
+
+      {/* Define pulse animation */}
+      <style jsx>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }
