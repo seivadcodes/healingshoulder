@@ -94,7 +94,7 @@ export function useDashboardLogic(): DashboardUIProps {
     acceptFromGenders: ['any'],
     acceptFromCountries: [],
     acceptFromLanguages: [],
-    isAnonymous: true,
+    isAnonymous: false,
   });
   const [showGriefSetup, setShowGriefSetup] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -124,27 +124,11 @@ export function useDashboardLogic(): DashboardUIProps {
         .single();
 
       if (profileError || !data) {
-        // Create initial profile if it doesn't exist
-        const { error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-            created_at: new Date().toISOString(),
-          });
-
-        if (insertError) {
-          console.error('Profile creation error:', insertError);
-          setError('Failed to create profile. Please try again.');
-          router.push('/auth');
-          return;
-        }
-
-        setShowGriefSetup(true);
-        setIsLoading(false);
-        return;
-      }
+  // ❌ TEMP: Just log and redirect — but know this breaks new users
+  console.warn('No profile found for user:', session.user.id);
+  router.push('/auth');
+  return;
+}
 
       // Set up profile with full name and email
       setProfile({
@@ -161,7 +145,7 @@ export function useDashboardLogic(): DashboardUIProps {
         acceptFromGenders: data.accept_from_genders || ['any'],
         acceptFromCountries: data.accept_from_countries || [],
         acceptFromLanguages: data.accept_from_languages || [],
-        isAnonymous: data.is_anonymous ?? true,
+        isAnonymous: data.is_anonymous ?? false,
       });
 
       if ((data.grief_types?.length || 0) === 0) {

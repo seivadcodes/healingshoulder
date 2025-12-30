@@ -4,79 +4,153 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
-import { PhoneOff, Video, VideoOff, Mic, MicOff, Clock, AlertTriangle, User as UserIcon } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  PhoneOff,
+  Mic,
+  MicOff,
+  Clock,
+  AlertTriangle,
+  User as UserIcon,
+} from 'lucide-react';
+import { Room, RoomEvent, Track, ConnectionState } from 'livekit-client';
+
+type Profile = {
+  id: string;
+  full_name?: string;
+  avatar_url?: string | null;
+};
+
+type RoomRecord = {
+  id: string;
+  room_id: string;
+  user_id: string;
+  acceptor_id: string | null;
+  status: string;
+};
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
+  const { user: authUser, loading: authLoading } = useAuth();
   const supabase = createClient();
   const roomId = params.id as string;
-  
-  // User and room state
-  const [user, setUser] = useState<any>(null);
-  const [room, setRoom] = useState<any>(null);
-  const [participants, setParticipants] = useState<any[]>([]);
+
+  // State
+  const [user, setUser] = useState<Profile | null>(null);
+  const [roomRecord, setRoomRecord] = useState<RoomRecord | null>(null);
+  const [participants, setParticipants] = useState<{ id: string; name: string; avatar?: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
-  
-  // Media streams
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  
-  // Media elements
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  
-  // WebRTC
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const channelRef = useRef<any>(null);
-  
-  // Call state
+  const [isInCall, setIsInCall] = useState(false);
+  const [room, setRoom] = useState<Room | null>(null);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [callStartedAt, setCallStartedAt] = useState<Date | null>(null);
   const [callDuration, setCallDuration] = useState(0);
-  const [isCallActive, setIsCallActive] = useState(false);
-  
-  // Timeout for missing participant
-  const missingParticipantTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [remoteMuted, setRemoteMuted] = useState(false);
+  const [callEndedByPeer, setCallEndedByPeer] = useState(false);
 
+  // Refs
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const supabaseChannelRef = useRef<any>(null);
+
+  // Redirect if not authenticated
   useEffect(() => {
+    if (!authLoading && !authUser) {
+      router.push('/auth');
+    }
+  }, [authUser, authLoading, router]);
+
+  // Cleanup on unmount or leave
+  const cleanupCall = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (remoteAudioRef.current) {
+      document.body.removeChild(remoteAudioRef.current);
+      remoteAudioRef.current = null;
+    }
+    if (supabaseChannelRef.current) {
+      supabase.removeChannel(supabaseChannelRef.current);
+      supabaseChannelRef.current = null;
+    }
+    setIsInCall(false);
+    setCallDuration(0);
+  };
+
+  // Initialize room & user
+  useEffect(() => {
+    if (!authUser?.id || !roomId) return;
+
     const initialize = async () => {
       try {
-        // Get user session
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) {
-          router.push('/auth');
-          return;
-        }
-
-        // Get user profile
-        const { data: profile, error: profileError } = await supabase
+        // Load user profile
+        const { data: profile, error: profileErr } = await supabase
           .from('profiles')
           .select('id, full_name, avatar_url')
-          .eq('id', session.user.id)
+          .eq('id', authUser.id)
           .single();
 
-        if (profileError) throw profileError;
+        if (profileErr) throw profileErr;
         setUser(profile);
 
-        // Verify room exists and user is part of it
-        await verifyRoomAccess(session.user.id);
-        
-        // Setup media
-        await setupMedia();
-        
-        // Setup real-time room updates
-        setupRoomSubscription();
-        
-        // Start call timer
-        setCallStartedAt(new Date());
-        
-      } catch (err) {
-        console.error('Initialization error:', err);
-        setError('Failed to join the room. Please try again.');
+        // Verify room access
+        const { data: roomData, error: roomErr } = await supabase
+          .from('quick_connect_requests')
+          .select('id, room_id, user_id, acceptor_id, status')
+          .eq('room_id', roomId)
+          .single();
+
+        if (roomErr || !roomData) throw new Error('Room not found');
+        if (roomData.status !== 'matched') throw new Error('Room is not active');
+        if (roomData.user_id !== authUser.id && roomData.acceptor_id !== authUser.id) {
+          throw new Error('Not authorized');
+        }
+
+        setRoomRecord(roomData);
+
+        // Load participant profiles
+        const ids = roomData.acceptor_id
+          ? [roomData.user_id, roomData.acceptor_id]
+          : [roomData.user_id];
+
+        const { data: profiles, error: profilesErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .in('id', ids);
+
+        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
+        const parts = ids.map(id => {
+          const p = profileMap.get(id);
+          return {
+            id,
+            name: p?.full_name || 'Anonymous',
+            avatar: p?.avatar_url || undefined,
+          };
+        });
+
+        setParticipants(parts);
+
+        // Set up Supabase Realtime channel for this room
+        const channelName = `room:${roomId}`;
+        const channel = supabase
+          .channel(channelName)
+          .on('broadcast', { event: 'call_ended' }, (payload) => {
+            console.log('Received call_ended signal from peer');
+            setCallEndedByPeer(true);
+          })
+          .subscribe();
+
+        supabaseChannelRef.current = channel;
+
+        // Join LiveKit room
+        await joinLiveKitRoom(roomId, authUser.id);
+
+      } catch (err: any) {
+        console.error('Init error:', err);
+        setError(err.message || 'Failed to join room');
       } finally {
         setIsLoading(false);
       }
@@ -85,305 +159,134 @@ export default function RoomPage() {
     initialize();
 
     return () => {
-      cleanup();
+      cleanupCall();
+      if (room) room.disconnect();
     };
-  }, [roomId]);
+  }, [roomId, authUser?.id]);
 
-  // Timer for call duration
-  useEffect(() => {
-    if (!callStartedAt || !isCallActive) return;
-
-    const timer = setInterval(() => {
-      const duration = Math.floor((Date.now() - callStartedAt.getTime()) / 1000);
-      setCallDuration(duration);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [callStartedAt, isCallActive]);
-
-  // Handle missing participant timeout
-  useEffect(() => {
-    if (participants.length < 2 && !missingParticipantTimeoutRef.current) {
-      // Set a 30-second timeout for the second participant to join
-      missingParticipantTimeoutRef.current = setTimeout(() => {
-        setError('The other participant hasn\'t joined yet. Please wait a moment or end the call.');
-      }, 30000);
-    } else if (participants.length >= 2 && missingParticipantTimeoutRef.current) {
-      clearTimeout(missingParticipantTimeoutRef.current);
-      missingParticipantTimeoutRef.current = null;
+  // Join LiveKit
+  const joinLiveKitRoom = async (roomName: string, identity: string) => {
+    const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+    if (!livekitUrl) {
+      setError('LiveKit URL not configured');
+      return;
     }
 
-    return () => {
-      if (missingParticipantTimeoutRef.current) {
-        clearTimeout(missingParticipantTimeoutRef.current);
+    const newRoom = new Room();
+    setRoom(newRoom);
+    setIsInCall(true);
+
+    newRoom.on(RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind === Track.Kind.Audio) {
+        const element = track.attach();
+        element.autoplay = true;
+        element.muted = false;
+        element.volume = 1.0;
+
+        if (remoteAudioRef.current) {
+          document.body.removeChild(remoteAudioRef.current);
+        }
+        remoteAudioRef.current = element;
+        document.body.appendChild(element);
+        setRemoteMuted(false);
       }
-    };
-  }, [participants]);
-
- const verifyRoomAccess = async (userId: string) => {
-  try {
-    // Fetch room data — include acceptor_id!
-    const { data: roomData, error: roomError } = await supabase
-      .from('quick_connect_requests')
-      .select(`
-        id,
-        status,
-        room_id,
-        user_id,
-        acceptor_id,
-        created_at,
-        requester_profile:profiles!user_id(id, full_name, avatar_url)
-      `)
-      .eq('room_id', roomId)
-      .single();
-
-    if (roomError) throw roomError;
-    if (!roomData) throw new Error('Room not found');
-
-    // Room must be in "matched" status
-    if (roomData.status !== 'matched') {
-      throw new Error('This room is no longer active');
-    }
-
-    // Check if current user is either requester or acceptor
-    const isRequester = roomData.user_id === userId;
-    const isAcceptor = roomData.acceptor_id === userId;
-
-    if (!isRequester && !isAcceptor) {
-      throw new Error('You are not authorized to join this room');
-    }
-
-    // Set room state
-    setRoom(roomData);
-
-    // Build participants list
-    const participantsList = [];
-
-    // Add requester
-    participantsList.push({
-      user_id: roomData.user_id,
-      full_name: roomData.requester_profile?.[0]?.full_name || 'Anonymous',
-      avatar_url: roomData.requester_profile?.[0]?.avatar_url || null,
-      isSelf: isRequester,
     });
 
-    // Add acceptor (if exists)
-    if (roomData.acceptor_id) {
-      const { data: acceptorProfile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url')
-        .eq('id', roomData.acceptor_id)
-        .single();
+    newRoom.on(RoomEvent.TrackUnsubscribed, () => {
+      setRemoteMuted(true);
+    });
 
-      if (profileError) {
-        console.warn('Could not load acceptor profile:', profileError);
+    newRoom.on(RoomEvent.Disconnected, () => {
+      cleanupCall();
+    });
+
+    newRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+      if (state === ConnectionState.Disconnected) {
+        cleanupCall();
       }
+    });
 
-      participantsList.push({
-        user_id: roomData.acceptor_id,
-        full_name: acceptorProfile?.full_name || 'Anonymous',
-        avatar_url: acceptorProfile?.avatar_url || null,
-        isSelf: isAcceptor,
-      });
-    }
-
-    setParticipants(participantsList);
-    return roomData;
-  } catch (err) {
-    console.error('Room verification failed:', err);
-    throw err;
-  }
-};
-  const setupMedia = async () => {
     try {
-      // Get media permissions
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: true
+      const tokenRes = await fetch('/api/livekit/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: roomName, identity }),
       });
-      
-      setLocalStream(stream);
-      
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.muted = true; // Prevent echo
-      }
-      
-      // Setup WebRTC connection
-      await setupWebRTC();
-      
-    } catch (err) {
-      console.error('Media setup failed:', err);
-      setError('Failed to access camera/microphone. Please check permissions.');
-    }
-  };
 
-  const setupWebRTC = async () => {
-    try {
-      // Create peer connection
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
-        ]
+      if (!tokenRes.ok) throw new Error(`Token error: ${tokenRes.status}`);
+      const { token } = await tokenRes.json();
+
+      await newRoom.connect(livekitUrl, token);
+
+      const tracks = await newRoom.localParticipant.createTracks({ audio: true });
+      tracks.forEach((track) => {
+        newRoom.localParticipant.publishTrack(track);
       });
-      
-      peerConnectionRef.current = peerConnection;
 
-      // Add local stream tracks
-      if (localStream) {
-        localStream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, localStream);
-        });
-      }
-
-      // Handle ICE candidates
-      peerConnection.onicecandidate = event => {
-        if (event.candidate) {
-          // Send candidate to other peer (would use signaling server in production)
-          console.log('ICE candidate:', event.candidate);
-        }
-      };
-
-      // Handle remote stream
-      peerConnection.ontrack = event => {
-        const remoteStream = new MediaStream();
-        event.streams[0].getTracks().forEach(track => {
-          remoteStream.addTrack(track);
-        });
-        
-        setRemoteStream(remoteStream);
-        
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-        }
-      };
-
-      // In a real app, you'd exchange SDP offers/answers via signaling
-      // For this demo, we'll simulate connection after 2 seconds
-      setTimeout(() => {
-        setIsCallActive(true);
-      }, 2000);
-
-    } catch (err) {
-      console.error('WebRTC setup failed:', err);
-      setError('Failed to establish video connection. Please try again.');
+      intervalRef.current = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('LiveKit join error:', err);
+      setError(`Call failed: ${err.message}`);
+      cleanupCall();
     }
-  };
-
-  const setupRoomSubscription = () => {
-    // Subscribe to room updates to detect when participants leave
-    const channel = supabase
-      .channel(`room:${roomId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'quick_connect_requests',
-          filter: `room_id=eq.${roomId}`
-        },
-        async (payload) => {
-          if (payload.new.status !== 'matched') {
-            // Room has been closed
-            handleCallEnd('The call has ended');
-          }
-        }
-      )
-      .subscribe();
-
-    channelRef.current = channel;
-
-    // Also listen for participant changes (in a real app, you'd have a participants table)
-    // For this demo, we'll just monitor the room status
   };
 
   const toggleAudio = () => {
-    if (!localStream) return;
-    
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-      audioTrack.enabled = !isAudioEnabled;
+    if (!room) return;
+    const localAudioTrack = room.localParticipant.audioTrackPublications.values().next().value?.track;
+    if (localAudioTrack) {
+      if (isAudioEnabled) {
+        localAudioTrack.mute();
+      } else {
+        localAudioTrack.unmute();
+      }
       setIsAudioEnabled(!isAudioEnabled);
     }
   };
 
-  const toggleVideo = () => {
-    if (!localStream) return;
-    
-    const videoTrack = localStream.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.enabled = !isVideoEnabled;
-      setIsVideoEnabled(!isVideoEnabled);
-      
-      if (localVideoRef.current) {
-        localVideoRef.current.classList.toggle('hidden', !isVideoEnabled);
-      }
-    }
-  };
-
-  const leaveRoom = async () => {
+  const leaveRoom = async (endedByUser: boolean = true) => {
     if (isLeaving) return;
-    
     setIsLeaving(true);
-    try {
-      // Update room status to completed
-      await supabase
-        .from('quick_connect_requests')
-        .update({ status: 'completed' })
-        .eq('room_id', roomId);
 
-      // Cleanup resources
-      cleanup();
-      
-      // Return to connect page
+    try {
+      if (endedByUser) {
+        await supabaseChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'call_ended',
+          payload: { by: authUser?.id },
+        });
+
+        await supabase
+          .from('quick_connect_requests')
+          .update({ status: 'completed' })
+          .eq('room_id', roomId);
+      }
+
+      if (room) {
+        room.disconnect();
+      }
+
       router.push('/connect');
     } catch (err) {
-      console.error('Failed to leave room:', err);
-      setError('Failed to leave the room. Please try again.');
+      console.error('Leave room error:', err);
+      setError('Failed to leave room');
+    } finally {
       setIsLeaving(false);
     }
   };
 
-  const handleCallEnd = (reason: string) => {
-    setError(reason);
-    setIsCallActive(false);
-    cleanup();
-    
-    // Auto-redirect after 3 seconds
-    setTimeout(() => {
-      router.push('/connect');
-    }, 3000);
-  };
-
-  const cleanup = () => {
-    // Clean up media streams
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
+  // Handle peer ending the call
+  useEffect(() => {
+    if (callEndedByPeer && isInCall) {
+      console.log('Peer ended the call. Disconnecting...');
+      if (room) room.disconnect();
+      setTimeout(() => {
+        router.push('/connect');
+      }, 1000);
     }
-    
-    if (remoteStream) {
-      remoteStream.getTracks().forEach(track => track.stop());
-    }
-    
-    // Clean up peer connection
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    
-    // Clean up Supabase channel
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-    
-    // Clean up timeout
-    if (missingParticipantTimeoutRef.current) {
-      clearTimeout(missingParticipantTimeoutRef.current);
-    }
-  };
+  }, [callEndedByPeer, isInCall, room, router]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -391,29 +294,89 @@ export default function RoomPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (isLoading) {
+  // === Loading State ===
+  if (authLoading || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-amber-50 to-stone-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto mb-4"></div>
-          <p className="text-stone-600">Joining room...</p>
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '3rem',
+            height: '3rem',
+            borderRadius: '50%',
+            border: '4px solid transparent',
+            borderTopColor: '#f59e0b',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 1rem',
+          }}></div>
+          <p style={{ color: '#78716c' }}>Joining room...</p>
         </div>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
 
+  // === Error State ===
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-amber-50 to-stone-100 p-4">
-        <div className="bg-white rounded-xl border border-stone-200 p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="text-red-500" size={32} />
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+        padding: '1rem',
+      }}>
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '2rem',
+          maxWidth: '32rem',
+          width: '100%',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            width: '4rem',
+            height: '4rem',
+            borderRadius: '9999px',
+            backgroundColor: '#fee2e2',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <AlertTriangle size={32} style={{ color: '#ef4444' }} />
           </div>
-          <h2 className="text-2xl font-bold text-stone-800 mb-3">Connection Issue</h2>
-          <p className="text-stone-600 mb-6">{error}</p>
+          <h2 style={{
+            fontSize: '1.5rem',
+            fontWeight: '700',
+            color: '#1c1917',
+            marginBottom: '0.75rem',
+          }}>Connection Issue</h2>
+          <p style={{ color: '#44403c', marginBottom: '1.5rem' }}>{error}</p>
           <button
             onClick={() => router.push('/connect')}
-            className="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-6 rounded-full transition-colors"
+            style={{
+              backgroundColor: '#f59e0b',
+              color: 'white',
+              fontWeight: '700',
+              padding: '0.75rem 1.5rem',
+              borderRadius: '9999px',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#d97706')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#f59e0b')}
           >
             Return to Connections
           </button>
@@ -422,201 +385,255 @@ export default function RoomPage() {
     );
   }
 
+  // === Main UI ===
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-100 p-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Room Header */}
-        <div className="flex justify-between items-center mb-6">
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
+      padding: '1rem',
+      paddingTop: '5rem',
+    }}>
+      <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
           <div>
-            <h1 className="text-2xl font-bold text-stone-800">Active Connection</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="flex -space-x-2">
-                {participants.map((participant, index) => (
-                  <div 
-                    key={participant.user_id || index} 
-                    className={`w-10 h-10 rounded-full border-2 ${
-                      participant.isSelf ? 'border-amber-400' : 'border-stone-200'
-                    } bg-stone-200 flex items-center justify-center overflow-hidden`}
+            <h1 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1c1917' }}>Audio Call</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <div style={{ display: 'flex', gap: '0.25rem' }}>
+                {participants.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      width: '2.5rem',
+                      height: '2.5rem',
+                      borderRadius: '9999px',
+                      border: p.id === user?.id ? '2px solid #f59e0b' : '2px solid #d6d3d1',
+                      backgroundColor: '#e5e5e4',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                    }}
                   >
-                    {participant.avatar_url ? (
-                      <img 
-                        src={participant.avatar_url} 
-                        alt={participant.full_name} 
-                        className="w-full h-full object-cover"
+                    {p.avatar ? (
+                      <img
+                        src={p.avatar}
+                        alt={p.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     ) : (
-                      <span className="text-stone-700 font-medium">
-                        {participant.full_name.charAt(0)}
+                      <span style={{ color: '#44403c', fontWeight: '600', fontSize: '1rem' }}>
+                        {p.name.charAt(0)}
                       </span>
                     )}
                   </div>
                 ))}
               </div>
-              <span className="text-stone-600">
+              <span style={{ color: '#78716c', fontSize: '0.875rem' }}>
                 {participants.length} participant{participants.length !== 1 ? 's' : ''}
               </span>
             </div>
           </div>
-          
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1 bg-amber-100 text-amber-800 rounded-full px-3 py-1">
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              backgroundColor: '#fef3c7',
+              color: '#92400e',
+              borderRadius: '9999px',
+              padding: '0.25rem 0.75rem',
+            }}>
               <Clock size={16} />
-              <span className="font-medium">{formatDuration(callDuration)}</span>
+              <span style={{ fontWeight: '600', fontSize: '0.875rem' }}>{formatDuration(callDuration)}</span>
             </div>
             <button
-              onClick={leaveRoom}
+              onClick={() => leaveRoom(true)}
               disabled={isLeaving}
-              className={`${
-                isLeaving 
-                  ? 'bg-stone-200 cursor-not-allowed' 
-                  : 'bg-red-500 hover:bg-red-600'
-              } text-white font-bold py-2 px-4 rounded-full flex items-center gap-2 transition-colors`}
+              style={{
+                backgroundColor: isLeaving ? '#d6d3d1' : '#ef4444',
+                color: 'white',
+                fontWeight: '700',
+                padding: '0.5rem 1rem',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: isLeaving ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+              onMouseEnter={(e) => {
+                if (!isLeaving) e.currentTarget.style.backgroundColor = isLeaving ? '#d6d3d1' : '#dc2626';
+              }}
+              onMouseLeave={(e) => {
+                if (!isLeaving) e.currentTarget.style.backgroundColor = '#ef4444';
+              }}
             >
               {isLeaving ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <div style={{
+                  width: '1rem',
+                  height: '1rem',
+                  borderRadius: '50%',
+                  border: '2px solid transparent',
+                  borderTopColor: 'white',
+                  animation: 'spin 1s linear infinite',
+                }}></div>
               ) : (
                 <PhoneOff size={18} />
               )}
-              End Call
+              Leave
             </button>
           </div>
         </div>
 
-        {/* Video Container */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* Main video (remote participant) */}
-          <div className="lg:col-span-2 bg-stone-800 rounded-xl overflow-hidden aspect-video relative">
-            {remoteStream ? (
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <div className="w-full h-full bg-stone-700 flex flex-col items-center justify-center text-center p-6">
-                <div className="w-16 h-16 rounded-full bg-amber-400 flex items-center justify-center mb-4">
-                  <UserIcon className="text-white" size={28} />
-                </div>
-                <h3 className="text-white text-xl font-bold mb-2">
-                  {participants.find(p => !p.isSelf)?.full_name || 'Anonymous'}
-                </h3>
-                <p className="text-stone-300">Joining the call...</p>
-              </div>
-            )}
-            
-            {/* Local video overlay */}
-            <div className="absolute bottom-4 right-4 w-32 h-24 bg-stone-800 rounded-lg overflow-hidden border-2 border-white">
-              {localStream ? (
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  className={`w-full h-full object-cover ${
-                    isVideoEnabled ? '' : 'opacity-50'
-                  }`}
-                />
-              ) : (
-                <div className="w-full h-full bg-stone-700 flex items-center justify-center">
-                  <UserIcon className="text-stone-400" size={20} />
-                </div>
-              )}
-            </div>
+        {/* Call Status Card */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '2rem',
+          textAlign: 'center',
+          marginBottom: '1.5rem',
+        }}>
+          <div style={{
+            width: '5rem',
+            height: '5rem',
+            borderRadius: '9999px',
+            backgroundColor: '#fef3c7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <UserIcon size={40} style={{ color: '#d97706' }} />
           </div>
-          
-          {/* Participant info and controls */}
-          <div className="bg-white rounded-xl border border-stone-200 p-6">
-            <h2 className="text-xl font-bold text-stone-800 mb-4">Participants</h2>
-            
-            <div className="space-y-4 mb-6">
-              {participants.map((participant) => (
-                <div 
-                  key={participant.user_id} 
-                  className={`flex items-center gap-3 p-3 rounded-lg ${
-                    participant.isSelf ? 'bg-amber-50' : 'hover:bg-stone-50'
-                  }`}
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
+            {isInCall ? 'Call in Progress' : 'Connecting...'}
+          </h2>
+          <p style={{ color: '#44403c' }}>
+            {remoteMuted ? 'Other participant muted' : 'Listening...'}
+          </p>
+        </div>
+
+        {/* Participants */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+        }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917', marginBottom: '1rem' }}>Participants</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {participants.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  backgroundColor: p.id === user?.id ? '#fffbeb' : 'transparent',
+                }}
+              >
+                <div
+                  style={{
+                    width: '3rem',
+                    height: '3rem',
+                    borderRadius: '9999px',
+                    border: p.id === user?.id ? '2px solid #f59e0b' : '1px solid #d6d3d1',
+                    backgroundColor: '#e5e5e4',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    overflow: 'hidden',
+                  }}
                 >
-                  <div className={`w-12 h-12 rounded-full ${
-                    participant.isSelf ? 'border-2 border-amber-400' : 'border border-stone-200'
-                  } bg-stone-200 flex items-center justify-center overflow-hidden flex-shrink-0`}>
-                    {participant.avatar_url ? (
-                      <img 
-                        src={participant.avatar_url} 
-                        alt={participant.full_name} 
-                        className="w-full h-full object-cover rounded-full"
-                      />
-                    ) : (
-                      <span className="text-stone-700 font-medium text-lg">
-                        {participant.full_name.charAt(0)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-stone-800 truncate">{participant.full_name}</h3>
-                    <p className={`text-xs ${
-                      participant.isSelf ? 'text-amber-600' : 'text-green-500'
-                    } font-medium`}>
-                      {participant.isSelf ? 'You' : 'Connected'}
-                    </p>
-                  </div>
+                  {p.avatar ? (
+                    <img
+                      src={p.avatar}
+                      alt={p.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '9999px' }}
+                    />
+                  ) : (
+                    <span style={{ color: '#44403c', fontWeight: '600', fontSize: '1.125rem' }}>
+                      {p.name.charAt(0)}
+                    </span>
+                  )}
                 </div>
-              ))}
-            </div>
-            
-            <div className="border-t border-stone-200 pt-4">
-              <h3 className="font-medium text-stone-800 mb-3">Call Controls</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={toggleAudio}
-                  className={`p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors ${
-                    isAudioEnabled 
-                      ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' 
-                      : 'bg-stone-100 text-stone-500 hover:bg-stone-200'
-                  }`}
-                >
-                  {isAudioEnabled ? <Mic size={24} /> : <MicOff size={24} />}
-                  <span className="text-sm font-medium">{isAudioEnabled ? 'Mute' : 'Unmute'}</span>
-                </button>
-                
-                <button
-                  onClick={toggleVideo}
-                  className={`p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors ${
-                    isVideoEnabled 
-                      ? 'bg-purple-50 text-purple-700 hover:bg-purple-100' 
-                      : 'bg-stone-100 text-stone-500 hover:bg-stone-200'
-                  }`}
-                >
-                  {isVideoEnabled ? <Video size={24} /> : <VideoOff size={24} />}
-                  <span className="text-sm font-medium">{isVideoEnabled ? 'Hide' : 'Show'} Video</span>
-                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h3 style={{ fontWeight: '600', color: '#1c1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {p.name}
+                  </h3>
+                  <p style={{
+                    fontSize: '0.75rem',
+                    fontWeight: '600',
+                    color: p.id === user?.id
+                      ? '#d97706'
+                      : callEndedByPeer
+                      ? '#64748b'
+                      : remoteMuted
+                      ? '#64748b'
+                      : '#16a34a',
+                  }}>
+                    {p.id === user?.id
+                      ? 'You'
+                      : callEndedByPeer
+                      ? 'Left'
+                      : remoteMuted
+                      ? 'Muted'
+                      : 'Connected'}
+                  </p>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
 
-        {/* Connection Status */}
-        <div className="bg-white rounded-xl border border-stone-200 p-4 text-center mb-8">
-          <div className="flex items-center justify-center gap-2 text-amber-600">
-            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
-            <span className="font-medium">Connection active • HD quality</span>
-          </div>
-        </div>
-
-        {/* Help Section */}
-        <div className="bg-amber-50 rounded-xl border border-amber-200 p-6">
-          <div className="flex items-start gap-4">
-            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-              <AlertTriangle className="text-amber-600" size={20} />
-            </div>
-            <div>
-              <h3 className="font-bold text-stone-800 mb-1">Connection Tips</h3>
-              <ul className="text-stone-600 space-y-1 text-sm">
-                <li>• If you can't hear or see the other person, try toggling your microphone or camera</li>
-                <li>• For best results, use a stable internet connection</li>
-                <li>• The call will automatically end after 30 minutes</li>
-                <li>• You can end the call anytime by clicking "End Call"</li>
-              </ul>
-            </div>
+        {/* Audio Control */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '0.75rem',
+          border: '1px solid #e5e5e5',
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+        }}>
+          <h3 style={{ fontWeight: '700', color: '#1c1917', marginBottom: '1rem' }}>Audio Control</h3>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <button
+              onClick={toggleAudio}
+              disabled={!isInCall || callEndedByPeer}
+              style={{
+                padding: '1rem',
+                borderRadius: '0.75rem',
+                border: 'none',
+                cursor: !isInCall || callEndedByPeer ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                backgroundColor: !isInCall || callEndedByPeer
+                  ? '#f5f5f4'
+                  : isAudioEnabled
+                  ? '#dbeafe'
+                  : '#f5f5f4',
+                color: !isInCall || callEndedByPeer
+                  ? '#a8a29e'
+                  : isAudioEnabled
+                  ? '#1e40af'
+                  : '#64748b',
+              }}
+            >
+              {isAudioEnabled ? <Mic size={28} /> : <MicOff size={28} />}
+              <span style={{ fontSize: '0.875rem', fontWeight: '600' }}>
+                {isAudioEnabled ? 'Mute' : 'Unmute'}
+              </span>
+            </button>
           </div>
         </div>
       </div>

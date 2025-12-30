@@ -1,4 +1,4 @@
-﻿// src/app/resources/page.tsx
+﻿﻿// src/app/resources/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -198,7 +198,6 @@ const allResources: {
   },
 ];
 
-// Now includes "Books"
 const categories = ["All", "Guides", "Stories", "Videos", "Tools", "Books"];
 
 export default function ResourcesPage() {
@@ -206,7 +205,6 @@ export default function ResourcesPage() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [forYou, setForYou] = useState<typeof allResources>([]);
 
-  // Simulate personalization (e.g., user visited "Loss of Parent")
   useEffect(() => {
     const recentInterest = 'parent';
     const suggestions = allResources
@@ -228,44 +226,107 @@ export default function ResourcesPage() {
      r.excerpt.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
+  // Common styles
+  const buttonBase = {
+    padding: '0.5rem 1.25rem',
+    fontSize: '0.875rem',
+    borderRadius: '9999px',
+    cursor: 'pointer',
+    border: 'none',
+    fontWeight: '500' as const,
+  };
+
+  const amberButton = {
+    ...buttonBase,
+    backgroundColor: '#f59e0b',
+    color: 'white',
+  };
+
+  const stoneButton = {
+    ...buttonBase,
+    backgroundColor: '#e5e5e4',
+    color: '#44403c',
+  };
+
+  const linkStyle = {
+    color: '#d97706',
+    fontWeight: '500' as const,
+    textDecoration: 'underline',
+    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    margin: 0,
+  };
+
   return (
-    <div className="min-h-screen bg-stone-50 pb-20 pt-6 px-4 sm:px-6">
-      <div className="max-w-4xl mx-auto">
+    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f4', paddingTop: '1.5rem', paddingBottom: '5rem', paddingLeft: '1rem', paddingRight: '1rem' }}>
+      <div style={{ maxWidth: '896px', margin: '0 auto' }}>
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-100 text-amber-700 mb-3">
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div
+            style={{
+              width: '3rem',
+              height: '3rem',
+              borderRadius: '9999px',
+              backgroundColor: '#fef3c7',
+              color: '#92400e',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 0.75rem',
+            }}
+          >
             <BookOpen size={20} />
           </div>
-          <h1 className="text-3xl font-serif font-bold text-stone-800 mb-2">
+          <h1 style={{ fontSize: '1.875rem', fontFamily: 'serif', fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
             Resources That Hold You
           </h1>
-          <p className="text-stone-600 max-w-2xl mx-auto">
+          <p style={{ color: '#44403c', maxWidth: '42rem', margin: '0 auto' }}>
             Created by people who’ve walked through grief — so you never have to feel alone.
           </p>
         </div>
 
         {/* Search */}
-        <div className="mb-8 max-w-lg mx-auto">
+        <div style={{ marginBottom: '2rem', maxWidth: '32rem', margin: '0 auto' }}>
           <input
             type="text"
             placeholder="Search for comfort, tools, or stories…"
-            className="w-full px-5 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '0.75rem 1.25rem',
+              borderRadius: '0.75rem',
+              border: '1px solid #e5e5e5',
+              backgroundColor: 'white',
+              fontSize: '1rem',
+              outline: 'none',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#f59e0b')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#e5e5e5')}
           />
         </div>
 
         {/* Categories */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8">
-          {categories.map(cat => (
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.5rem', marginBottom: '2rem' }}>
+          {categories.map((cat) => (
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-5 py-2 text-sm rounded-full transition ${
-                selectedCategory === cat
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-              }`}
+              style={
+  selectedCategory === cat ? amberButton : stoneButton
+}
+              onMouseEnter={(e) => {
+                if (selectedCategory !== cat) {
+                  e.currentTarget.style.backgroundColor = '#d6d3d1';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedCategory !== cat) {
+                  e.currentTarget.style.backgroundColor = '#e5e5e4';
+                }
+              }}
             >
               {cat}
             </button>
@@ -275,28 +336,34 @@ export default function ResourcesPage() {
         {/* Smart Featured Section */}
         {isDefaultView ? (
           featured.length > 0 && (
-            <section className="mb-10">
-              <h2 className="text-xl font-semibold text-stone-800 mb-4 flex items-center">
-                <span className="w-8 h-px bg-amber-500 mr-3"></span>
+            <section style={{ marginBottom: '2.5rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1c1917', marginBottom: '1rem', display: 'flex', alignItems: 'center' }}>
+                <span style={{ width: '2rem', height: '2px', backgroundColor: '#f59e0b', marginRight: '0.75rem' }}></span>
                 Featured for You
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {featured.map(r => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.25rem', maxWidth: '100%' }}>
+                {featured.map((r) => (
                   <ResourceCard key={r.id} {...r} />
                 ))}
               </div>
             </section>
           )
         ) : (
-          // Minimal banner when filtered
           featured.length > 0 && (
-            <div className="text-center mb-6">
+            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
               <button
                 onClick={() => {
                   setSelectedCategory('All');
                   setSearchQuery('');
                 }}
-                className="text-sm text-amber-600 hover:underline flex items-center justify-center gap-1"
+                style={{
+                  ...linkStyle,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.25rem',
+                  fontSize: '0.875rem',
+                }}
               >
                 ← Back to Featured Resources
               </button>
@@ -306,12 +373,12 @@ export default function ResourcesPage() {
 
         {/* For You */}
         {isDefaultView && forYou.length > 0 && (
-          <section className="mb-10">
-            <h2 className="text-lg text-stone-700 mb-3">
+          <section style={{ marginBottom: '2.5rem' }}>
+            <h2 style={{ fontSize: '1rem', color: '#44403c', marginBottom: '0.75rem' }}>
               Because you’ve been thinking about loss of a parent…
             </h2>
-            <div className="space-y-4">
-              {forYou.map(r => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {forYou.map((r) => (
                 <ResourceCard key={`fy-${r.id}`} {...r} />
               ))}
             </div>
@@ -320,26 +387,23 @@ export default function ResourcesPage() {
 
         {/* All Resources */}
         <section>
-          <h2 className="text-lg font-medium text-stone-700 mb-4">
+          <h2 style={{ fontSize: '1rem', fontWeight: '500', color: '#44403c', marginBottom: '1rem' }}>
             {selectedCategory === 'All' ? 'All Resources' : selectedCategory}
           </h2>
           {filtered.filter(r => !r.featured || !isDefaultView).length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-stone-600 mb-3">
+            <div style={{ textAlign: 'center', paddingTop: '2rem', paddingBottom: '2rem' }}>
+              <p style={{ color: '#44403c', marginBottom: '0.75rem' }}>
                 We couldn’t find anything for “{searchQuery}” — but someone in our community might have just what you need.
               </p>
-              <Link
-                href="/communities"
-                className="text-amber-600 font-medium hover:underline"
-              >
-                Ask in a Community →
+              <Link href="/communities">
+                <span style={linkStyle}>Ask in a Community →</span>
               </Link>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {filtered
                 .filter(r => !r.featured || !isDefaultView)
-                .map(r => (
+                .map((r) => (
                   <ResourceCard key={r.id} {...r} />
                 ))}
             </div>
@@ -347,11 +411,14 @@ export default function ResourcesPage() {
         </section>
 
         {/* Footer CTA */}
-        <footer className="mt-12 text-center text-stone-500 text-sm">
+        <footer style={{ marginTop: '3rem', textAlign: 'center', color: '#78716c', fontSize: '0.875rem' }}>
           <p>Created by grievers, for grievers.</p>
           <button
             onClick={() => alert('Navigate to submit form')}
-            className="text-amber-600 hover:underline mt-1"
+            style={{
+              ...linkStyle,
+              marginTop: '0.25rem',
+            }}
           >
             Submit your story or guide
           </button>

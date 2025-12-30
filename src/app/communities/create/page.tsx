@@ -1,26 +1,24 @@
 // src/app/communities/create/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
-import Button from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Users, ArrowLeft, Image, X } from 'lucide-react';
+import { Users, ArrowLeft, Image as ImageIcon, X } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
-// Grief types that match the database schema and UI color system
+// Grief types with inline-friendly gradient strings
 const GRIEF_TYPES = [
-  { id: 'parent', label: 'Loss of a Parent', gradient: 'from-amber-200 to-orange-300' },
-  { id: 'child', label: 'Loss of a Child', gradient: 'from-purple-200 to-indigo-300' },
-  { id: 'spouse', label: 'Grieving a Partner', gradient: 'from-rose-200 to-pink-300' },
-  { id: 'sibling', label: 'Loss of a Sibling', gradient: 'from-teal-200 to-cyan-300' },
-  { id: 'friend', label: 'Loss of a Friend', gradient: 'from-blue-200 to-indigo-300' },
-  { id: 'pet', label: 'Pet Loss', gradient: 'from-yellow-200 to-amber-300' },
-  { id: 'miscarriage', label: 'Pregnancy or Infant Loss', gradient: 'from-pink-200 to-rose-300' },
-  { id: 'caregiver', label: 'Caregiver Grief', gradient: 'from-stone-200 to-amber-300' },
-  { id: 'suicide', label: 'Suicide Loss', gradient: 'from-violet-200 to-purple-300' },
-  { id: 'other', label: 'Other Loss', gradient: 'from-gray-200 to-stone-300' }
+  { id: 'parent', label: 'Loss of a Parent', gradient: 'linear-gradient(135deg, #fed7aa, #fdba74)' },
+  { id: 'child', label: 'Loss of a Child', gradient: 'linear-gradient(135deg, #ddd6fe, #c4b5fd)' },
+  { id: 'spouse', label: 'Grieving a Partner', gradient: 'linear-gradient(135deg, #fce7f3, #fbcfe8)' },
+  { id: 'sibling', label: 'Loss of a Sibling', gradient: 'linear-gradient(135deg, #a7f3d0, #67e8f9)' },
+  { id: 'friend', label: 'Loss of a Friend', gradient: 'linear-gradient(135deg, #bfdbfe, #a5b4fc)' },
+  { id: 'pet', label: 'Pet Loss', gradient: 'linear-gradient(135deg, #fef08a, #fde047)' },
+  { id: 'miscarriage', label: 'Pregnancy or Infant Loss', gradient: 'linear-gradient(135deg, #fbcfe8, #f9a8d4)' },
+  { id: 'caregiver', label: 'Caregiver Grief', gradient: 'linear-gradient(135deg, #e5e7eb, #fde68a)' },
+  { id: 'suicide', label: 'Suicide Loss', gradient: 'linear-gradient(135deg, #ddd6fe, #ddd6fe)' },
+  { id: 'other', label: 'Other Loss', gradient: 'linear-gradient(135deg, #e5e7eb, #d1d5db)' }
 ];
 
 export default function CreateCommunityPage() {
@@ -35,8 +33,8 @@ export default function CreateCommunityPage() {
   const router = useRouter();
   const supabase = createClient();
   const { user, sessionChecked } = useAuth();
-  
-  // Redirect to login WITH redirect path if not authenticated and session has been checked
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (sessionChecked && !user) {
       const currentPath = window.location.pathname;
@@ -44,21 +42,31 @@ export default function CreateCommunityPage() {
     }
   }, [user, sessionChecked, router]);
 
-  // Loading state while checking session
   if (!sessionChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-solid border-amber-500 border-t-transparent mx-auto mb-4"></div>
-          <p className="text-stone-600">Verifying your session...</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            height: '2rem',
+            width: '2rem',
+            borderRadius: '9999px',
+            border: '4px solid transparent',
+            borderTopColor: '#f59e0b',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 1rem',
+          }}></div>
+          <p style={{ color: '#78716c' }}>Verifying your session...</p>
         </div>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   const generateSlug = (name: string) => {
     return name
@@ -74,20 +82,12 @@ export default function CreateCommunityPage() {
       setError('Please fill in all required fields');
       return;
     }
-    
     if (name.length < 3) {
       setError('Community name must be at least 3 characters long');
       return;
     }
-    
     if (description.length < 10) {
       setError('Please provide a more detailed description');
-      return;
-    }
-
-    if (!user) {
-      setError('Session expired. Please log in again to create a community.');
-      router.push('/auth?redirectTo=/communities/create');
       return;
     }
 
@@ -110,8 +110,6 @@ export default function CreateCommunityPage() {
         return;
       }
 
-      // ✅ Create community WITHOUT member_count (or set to 0 if column must exist)
-      // Best practice: omit it, but if DB requires it, set to 0 and rely on UI to compute real count
       const { error: communityError } = await supabase
         .from('communities')
         .insert({
@@ -119,15 +117,13 @@ export default function CreateCommunityPage() {
           name: name.trim(),
           description: description.trim(),
           grief_type: griefType,
-          // ❌ REMOVE member_count — or set to 0 as placeholder
-          member_count: 0, // optional: only if your DB schema requires it
-          online_count: 0, // same for online_count — should also be computed or via presence
+          member_count: 0,
+          online_count: 0,
           created_at: new Date().toISOString()
         });
 
       if (communityError) throw communityError;
 
-      // Add creator as admin member
       const { error: memberError } = await supabase
         .from('community_members')
         .insert({
@@ -139,7 +135,6 @@ export default function CreateCommunityPage() {
 
       if (memberError) throw memberError;
 
-      // Handle banner upload
       if (fileToUpload) {
         try {
           const fileExt = fileToUpload.name.split('.').pop();
@@ -147,9 +142,7 @@ export default function CreateCommunityPage() {
           
           const { error: uploadError } = await supabase.storage
             .from('communities')
-            .upload(fileName, fileToUpload, {
-              upsert: true
-            });
+            .upload(fileName, fileToUpload, { upsert: true });
 
           if (uploadError) throw uploadError;
         } catch (uploadErr: any) {
@@ -159,7 +152,6 @@ export default function CreateCommunityPage() {
       }
 
       router.push(`/communities/${communityId}`);
-      
     } catch (err: any) {
       console.error('Community creation error:', err);
       setError(err.message || 'Failed to create community. Please try again.');
@@ -171,28 +163,20 @@ export default function CreateCommunityPage() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = '';
     
     if (!file.type.startsWith('image/')) {
       setError('Please upload an image file (JPEG, PNG, GIF, etc.)');
       return;
     }
-    
     if (file.size > 5 * 1024 * 1024) {
       setError('Image must be less than 5MB');
       return;
     }
 
     setFileToUpload(file);
-    
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setPreviewImage(reader.result as string);
-      setError(null);
-    };
-    reader.onerror = () => {
-      setError('Failed to load image preview. Please try a different image.');
-    };
+    reader.onloadend = () => setPreviewImage(reader.result as string);
+    reader.onerror = () => setError('Failed to load image preview. Please try a different image.');
     reader.readAsDataURL(file);
   };
 
@@ -202,59 +186,92 @@ export default function CreateCommunityPage() {
     setError(null);
   };
 
+  const currentGradient = GRIEF_TYPES.find(t => t.id === griefType)?.gradient || GRIEF_TYPES[0].gradient;
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50 via-stone-50 to-stone-100 p-4 md:p-6 pt-20 md:pt-6">
-      <div className="max-w-2xl mx-auto">
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(to bottom, #fffbeb, #f5f5f4, #f4f4f5)',
+        padding: '1rem 1rem 3rem',
+        paddingTop: window.innerWidth >= 768 ? '1.5rem' : '5rem',
+      }}
+    >
+      <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
         <button
           onClick={() => router.back()}
-          className="flex items-center text-amber-700 hover:text-amber-800 mb-6 transition-colors"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            color: '#92400e',
+            marginBottom: '1.5rem',
+            fontSize: '0.95rem',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = '#78350f')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = '#92400e')}
         >
-          <ArrowLeft className="h-4 w-4 mr-1" />
-          <span>Back to Communities</span>
+          <ArrowLeft size={16} style={{ marginRight: '0.25rem' }} />
+          Back to Communities
         </button>
         
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-amber-200 to-orange-300 mb-4 mx-auto">
-            <Users className="h-7 w-7 text-white" />
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div
+            style={{
+              width: '3.5rem',
+              height: '3.5rem',
+              borderRadius: '9999px',
+              background: currentGradient,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1rem',
+            }}
+          >
+            <Users size={28} style={{ color: 'white' }} />
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-stone-800 mb-2">
+          <h1 style={{ fontSize: '1.875rem', fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
             Create Your Community
           </h1>
-          <p className="text-stone-600">
+          <p style={{ color: '#44403c' }}>
             Start a safe space where others who share your grief journey can find connection.
           </p>
         </div>
 
-        <Card className="bg-white rounded-xl border border-stone-200 p-6 shadow-sm">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-stone-700">
+        <div
+          style={{
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
+            border: '1px solid #e5e5e5',
+            padding: '1.5rem',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          }}
+        >
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Banner Upload */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.875rem', fontWeight: '600', color: '#44403c' }}>
                 Community Banner (optional)
               </label>
-              <div className="relative">
+              <div style={{ position: 'relative' }}>
                 {previewImage ? (
-                  <div className="relative group">
-                    <div 
-                      className="border-2 border-stone-200 rounded-lg overflow-hidden cursor-pointer"
-                      onClick={() => document.getElementById('banner-upload')?.click()}
+                  <div style={{ position: 'relative' }}>
+                    <div
+                      style={{
+                        border: '2px solid #e5e5e5',
+                        borderRadius: '0.5rem',
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                        position: 'relative',
+                      }}
+                      onClick={() => fileInputRef.current?.click()}
                     >
-                      <div className="relative h-48 w-full bg-stone-100">
-                        <img 
-                          src={previewImage} 
-                          alt="Community banner preview" 
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            setPreviewImage(null);
-                          }}
+                      <div style={{ height: '12rem', width: '100%', backgroundColor: '#f5f5f4' }}>
+                        <img
+                          src={previewImage}
+                          alt="Community banner preview"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={() => setPreviewImage(null)}
                         />
-                      </div>
-                    </div>
-                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all opacity-0 group-hover:opacity-100 pointer-events-none rounded-lg"></div>
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
-                      <div className="text-white bg-black bg-opacity-50 px-4 py-2 rounded-full flex items-center text-sm">
-                        <Image className="h-4 w-4 mr-2" />
-                        <span>Change banner</span>
                       </div>
                     </div>
                     <button
@@ -263,41 +280,79 @@ export default function CreateCommunityPage() {
                         e.stopPropagation();
                         removeBanner();
                       }}
-                      className="absolute -top-2 -right-2 bg-amber-500 text-white rounded-full p-1.5 shadow-md hover:bg-amber-600 transition-colors z-10"
+                      style={{
+                        position: 'absolute',
+                        top: '-0.5rem',
+                        right: '-0.5rem',
+                        background: '#f59e0b',
+                        color: 'white',
+                        borderRadius: '9999px',
+                        width: '1.75rem',
+                        height: '1.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#d97706')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = '#f59e0b')}
                       title="Remove banner"
                     >
-                      <X className="h-4 w-4" />
+                      <X size={16} />
                     </button>
                   </div>
                 ) : (
-                  <div 
-                    className="border-2 border-dashed border-stone-300 rounded-lg p-6 text-center cursor-pointer hover:border-amber-400 transition-colors"
-                    onClick={() => document.getElementById('banner-upload')?.click()}
+                  <div
+                    style={{
+                      border: '2px dashed #d6d3d1',
+                      borderRadius: '0.5rem',
+                      padding: '1.5rem',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'border-color 0.2s',
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#f59e0b')}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#d6d3d1')}
                   >
-                    <div className="mx-auto w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mb-3">
-                      <Image className="h-8 w-8 text-amber-700" />
+                    <div
+                      style={{
+                        width: '4rem',
+                        height: '4rem',
+                        borderRadius: '9999px',
+                        backgroundColor: '#fef3c7',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        margin: '0 auto 0.75rem',
+                      }}
+                    >
+                      <ImageIcon size={32} style={{ color: '#d97706' }} />
                     </div>
-                    <p className="text-stone-700 font-medium mb-1">
+                    <p style={{ color: '#1c1917', fontWeight: '600', marginBottom: '0.25rem' }}>
                       Upload a banner image
                     </p>
-                    <p className="text-sm text-stone-500">
+                    <p style={{ fontSize: '0.875rem', color: '#78716c' }}>
                       Recommended: 1200x300px (16:9 ratio), max 5MB
                     </p>
                   </div>
                 )}
               </div>
               <input
+                ref={fileInputRef}
                 type="file"
-                id="banner-upload"
                 accept="image/*"
-                className="hidden"
+                style={{ display: 'none' }}
                 onChange={handleImageUpload}
               />
             </div>
 
-            <div className="space-y-2">
-              <label htmlFor="name" className="block text-sm font-medium text-stone-700">
-                Community Name <span className="text-red-500">*</span>
+            {/* Name */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label htmlFor="name" style={{ fontSize: '0.875rem', fontWeight: '600', color: '#44403c' }}>
+                Community Name <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <input
                 id="name"
@@ -305,102 +360,177 @@ export default function CreateCommunityPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g., Loss of a Parent"
-                className="w-full px-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 1rem',
+                  border: '1px solid #d6d3d1',
+                  borderRadius: '0.5rem',
+                  fontSize: '1rem',
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#f59e0b')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = '#d6d3d1')}
                 maxLength={60}
               />
-              <p className="text-xs text-stone-500">
-                This will be used in the community URL: healingshoulder.com/communities/{generateSlug(name) || 'your-community'}
+              <p style={{ fontSize: '0.75rem', color: '#78716c' }}>
+                This will be used in the community URL: healingshoulder.com/communities/
+                <span style={{ fontWeight: '600' }}>{generateSlug(name) || 'your-community'}</span>
               </p>
             </div>
 
-            <div className="space-y-2">
-              <label htmlFor="description" className="block text-sm font-medium text-stone-700">
-                Description <span className="text-red-500">*</span>
+            {/* Description */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label htmlFor="description" style={{ fontSize: '0.875rem', fontWeight: '600', color: '#44403c' }}>
+                Description <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <textarea
                 id="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe your community in 1-2 sentences. What grief experience does it center around?"
-                className="w-full px-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent min-h-[100px]"
+                placeholder="Describe your community in 1-2 sentences..."
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 1rem',
+                  border: '1px solid #d6d3d1',
+                  borderRadius: '0.5rem',
+                  fontSize: '1rem',
+                  minHeight: '6rem',
+                  resize: 'vertical',
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#f59e0b')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = '#d6d3d1')}
                 maxLength={250}
               />
-              <p className="text-xs text-stone-500">
+              <p style={{ fontSize: '0.75rem', color: '#78716c' }}>
                 {description.length}/250 characters
               </p>
             </div>
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-stone-700">
-                Primary Grief Type <span className="text-red-500">*</span>
+            {/* Grief Type */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.875rem', fontWeight: '600', color: '#44403c' }}>
+                Primary Grief Type <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div style={{ display: 'grid', gridTemplateColumns: window.innerWidth >= 640 ? '1fr 1fr' : '1fr', gap: '0.75rem' }}>
                 {GRIEF_TYPES.map((type) => (
                   <button
                     key={type.id}
                     type="button"
                     onClick={() => setGriefType(type.id)}
-                    className={`flex items-center p-3 rounded-lg border text-left transition-all ${
-                      griefType === type.id
-                        ? `border-amber-400 bg-gradient-to-br ${type.gradient} text-white`
-                        : 'border-stone-300 hover:border-amber-300 hover:bg-stone-50'
-                    }`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '0.75rem',
+                      borderRadius: '0.5rem',
+                      border: griefType === type.id ? '2px solid #f59e0b' : '1px solid #d6d3d1',
+                      background: griefType === type.id ? type.gradient : '#f5f5f4',
+                      color: griefType === type.id ? 'white' : '#1c1917',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      transition: 'border-color 0.2s',
+                    }}
                   >
-                    <div className={`w-3 h-3 rounded-full mr-3 bg-gradient-to-br ${type.gradient}`}></div>
-                    <span className="font-medium">{type.label}</span>
+                    <div
+                      style={{
+                        width: '0.75rem',
+                        height: '0.75rem',
+                        borderRadius: '50%',
+                        background: type.gradient,
+                        marginRight: '0.75rem',
+                      }}
+                    ></div>
+                    <span style={{ fontWeight: '600' }}>{type.label}</span>
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-stone-500">
+              <p style={{ fontSize: '0.75rem', color: '#78716c' }}>
                 This helps match your community with others experiencing similar loss
               </p>
             </div>
 
+            {/* Errors */}
             {error && (
-              <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">
+              <div style={{ padding: '0.75rem', backgroundColor: '#fee2e2', color: '#b91c1c', borderRadius: '0.5rem', fontSize: '0.875rem' }}>
                 {error}
               </div>
             )}
-            
             {uploadError && (
-              <div className="p-3 bg-amber-50 text-amber-700 rounded-lg text-sm">
+              <div style={{ padding: '0.75rem', backgroundColor: '#fffbeb', color: '#92400e', borderRadius: '0.5rem', fontSize: '0.875rem' }}>
                 {uploadError}
               </div>
             )}
 
-            <div className="pt-4 border-t border-stone-200">
-              <Button
+            {/* Submit */}
+            <div style={{ paddingTop: '1rem', borderTop: '1px solid #e5e5e5', marginTop: '0.5rem' }}>
+              <button
                 type="submit"
                 disabled={isSubmitting || !name.trim() || !description.trim()}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 font-medium"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  backgroundColor: isSubmitting || !name.trim() || !description.trim() ? '#d6d3d1' : '#f59e0b',
+                  color: 'white',
+                  fontWeight: '600',
+                  borderRadius: '9999px',
+                  border: 'none',
+                  cursor: isSubmitting || !name.trim() || !description.trim() ? 'not-allowed' : 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSubmitting && name.trim() && description.trim()) {
+                    e.currentTarget.style.backgroundColor = '#d97706';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSubmitting && name.trim() && description.trim()) {
+                    e.currentTarget.style.backgroundColor = '#f59e0b';
+                  }
+                }}
               >
                 {isSubmitting ? (
-                  <span className="flex items-center justify-center">
-                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-solid border-white border-t-transparent mr-2"></span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div
+                      style={{
+                        width: '1.25rem',
+                        height: '1.25rem',
+                        borderRadius: '50%',
+                        border: '2px solid transparent',
+                        borderTopColor: 'white',
+                        animation: 'spin 1s linear infinite',
+                        marginRight: '0.5rem',
+                      }}
+                    ></div>
                     Creating Community...
-                  </span>
+                  </div>
                 ) : (
                   'Create Community'
                 )}
-              </Button>
-              <p className="text-center text-xs text-stone-500 mt-3">
+              </button>
+              <p style={{ textAlign: 'center', fontSize: '0.75rem', color: '#78716c', marginTop: '0.75rem' }}>
                 By creating this community, you agree to moderate it with care and compassion. 
                 You can add co-moderators later.
               </p>
             </div>
           </form>
-        </Card>
+        </div>
 
-        <div className="mt-8 bg-white rounded-xl border border-stone-200 p-5">
-          <h3 className="font-medium text-stone-800 mb-3 flex items-center">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block mr-2"></span>
+        {/* Guidelines */}
+        <div
+          style={{
+            marginTop: '2rem',
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
+            border: '1px solid #e5e5e5',
+            padding: '1.25rem',
+          }}
+        >
+          <h3 style={{ fontWeight: '600', color: '#1c1917', marginBottom: '0.75rem', display: 'flex', alignItems: 'center' }}>
+            <span style={{ width: '0.25rem', height: '0.25rem', borderRadius: '50%', backgroundColor: '#f59e0b', marginRight: '0.5rem' }}></span>
             Community Guidelines
           </h3>
-          <ul className="space-y-2 text-sm text-stone-600">
-            <li>• Your community should have a clear focus on a specific grief experience</li>
-            <li>• You are responsible for creating a safe, inclusive space</li>
-            <li>• Healing Shoulder staff may reach out to help you moderate as your community grows</li>
-            <li>• Communities that become inactive or harmful may be archived by staff</li>
+          <ul style={{ color: '#44403c', fontSize: '0.875rem', lineHeight: '1.5' }}>
+            <li style={{ marginTop: '0.25rem' }}>• Your community should have a clear focus on a specific grief experience</li>
+            <li style={{ marginTop: '0.25rem' }}>• You are responsible for creating a safe, inclusive space</li>
+            <li style={{ marginTop: '0.25rem' }}>• Surviving Death Loss staff may reach out to help you moderate as your community grows</li>
+            <li style={{ marginTop: '0.25rem' }}>• Communities that become inactive or harmful may be archived by staff</li>
           </ul>
         </div>
       </div>
