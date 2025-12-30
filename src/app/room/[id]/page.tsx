@@ -193,7 +193,19 @@ export default function RoomPage() {
   const newRoom = new Room();
   setRoom(newRoom);
 
-  // Helper to start the call duration timer
+  // Helper: Check if any remote participant has an active, subscribed audio track
+  const hasActiveRemoteAudio = () => {
+    for (const participant of newRoom.remoteParticipants.values()) {
+      for (const pub of participant.audioTrackPublications.values()) {
+        if (pub.isSubscribed && pub.track) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Helper: Start the timer only once when real audio exchange begins
   const startCallTimer = () => {
     if (callDurationStartedRef.current) return;
     callDurationStartedRef.current = true;
@@ -203,15 +215,14 @@ export default function RoomPage() {
     }, 1000);
   };
 
-  // Function to check if call should start (both participants present)
+  // Main trigger to evaluate if call should start
   const checkAndStartCall = () => {
-    // Only start if we have at least one remote participant
-    if (newRoom.remoteParticipants.size >= 1 && !callDurationStartedRef.current) {
+    if (!callDurationStartedRef.current && hasActiveRemoteAudio()) {
       startCallTimer();
     }
   };
 
-  // Handle audio track subscription
+  // Handle incoming remote audio
   newRoom.on(RoomEvent.TrackSubscribed, (track) => {
     if (track.kind === Track.Kind.Audio) {
       const element = track.attach();
@@ -225,6 +236,9 @@ export default function RoomPage() {
       remoteAudioRef.current = element;
       document.body.appendChild(element);
       setRemoteMuted(false);
+
+      // 🔥 Now that we have live audio, check if timer should start
+      checkAndStartCall();
     }
   });
 
@@ -232,26 +246,23 @@ export default function RoomPage() {
     setRemoteMuted(true);
   });
 
-  // Clean up when disconnected
-  newRoom.on(RoomEvent.Disconnected, () => {
-    cleanupCall();
+  // Optional: Re-check if someone reconnects and publishes audio later
+  newRoom.on(RoomEvent.ParticipantConnected, () => {
+    // Audio may publish shortly after connect—defer check slightly
+    setTimeout(checkAndStartCall, 500);
   });
 
+  // Also check on initial connect (in case remote was already there)
+  newRoom.on(RoomEvent.Connected, () => {
+    setTimeout(checkAndStartCall, 500);
+  });
+
+  // Cleanup on disconnect
+  newRoom.on(RoomEvent.Disconnected, cleanupCall);
   newRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
     if (state === ConnectionState.Disconnected) {
       cleanupCall();
     }
-  });
-
-  // 🔥 CRITICAL: Start timer when remote participant joins
-  newRoom.on(RoomEvent.ParticipantConnected, () => {
-    checkAndStartCall();
-  });
-
-  // 🔥 Also check in case remote is already present when we connect
-  newRoom.on(RoomEvent.Connected, () => {
-    // Small delay to ensure remoteParticipants is populated
-    setTimeout(checkAndStartCall, 300);
   });
 
   try {
@@ -266,15 +277,13 @@ export default function RoomPage() {
 
     await newRoom.connect(livekitUrl, token);
 
-    // Publish local audio track
+    // Publish local audio
     const tracks = await newRoom.localParticipant.createTracks({ audio: true });
     tracks.forEach((track) => {
       newRoom.localParticipant.publishTrack(track);
     });
 
-    // ✅ Do NOT start timer here — wait for remote participant!
     setIsInCall(true);
-
   } catch (err: any) {
     console.error('LiveKit join error:', err);
     setError(`Call failed: ${err.message}`);

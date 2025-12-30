@@ -468,7 +468,7 @@ const cancelRequest = async () => {
               <MessageCircle size={32} style={{ color: '#d97706' }} />
             </div>
             <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1c1917', marginBottom: '0.75rem' }}>
-              I need to talk
+              Need to Talk?
             </h2>
             <p style={{ color: '#78716c', marginBottom: '1.5rem', maxWidth: '32rem', margin: '0 auto' }}>
               Post a request to connect with someone from the community who&apos;s available to listen right now. Your request will be visible to others for 10 minutes.
@@ -531,9 +531,33 @@ const cancelRequest = async () => {
                         </p>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <Phone size={24} style={{ color: '#d97706', marginLeft: '0.75rem' }} />
-                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', marginLeft: '1rem' }}>
+  <button
+    onClick={(e) => {
+      e.stopPropagation(); // Prevent double-trigger from row click
+      !isRedirectingRef.current && acceptRequest(request.id);
+    }}
+    style={{
+      background: '#10b981', // green-500
+      color: 'white',
+      border: 'none',
+      borderRadius: '9999px',
+      padding: '0.375rem 1rem',
+      fontWeight: '600',
+      fontSize: '0.875rem',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.375rem',
+      transition: 'background 0.2s',
+    }}
+    onMouseEnter={(e) => (e.currentTarget.style.background = '#059669')} // green-600
+    onMouseLeave={(e) => (e.currentTarget.style.background = '#10b981')}
+  >
+    <Phone size={16} />
+    Accept
+  </button>
+</div>
                   </div>
                 </div>
               ))}
