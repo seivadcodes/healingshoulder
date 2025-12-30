@@ -333,22 +333,34 @@ export default function ConnectPage() {
     }
   };
 
-  const cancelRequest = async () => {
-    if (!activeRequest || isRedirectingRef.current) return;
-    
-    try {
-      const { error } = await supabase
-        .from('quick_connect_requests')
-        .update({ status: 'completed' })
-        .eq('id', activeRequest.id);
+const cancelRequest = async () => {
+  if (!activeRequest || isRedirectingRef.current) return;
 
-      if (error) throw error;
+  try {
+    const { error, data } = await supabase
+      .from('quick_connect_requests')
+      .update({ status: 'completed' })
+      .eq('id', activeRequest.id)
+      .eq('status', 'available') // 👈 Only cancel if still available
+      .select(); // 👈 Select to see if any row was updated
+
+    if (error) throw error;
+
+    // If no rows were updated, it means the request was already taken or expired
+    if (!data || data.length === 0) {
+      // Treat as if it's no longer valid—clear it from UI
       setActiveRequest(null);
-    } catch (err) {
-      console.error('Failed to cancel request:', err);
-      setError('Failed to cancel request. Please try again.');
+      setError('Request was already accepted or expired.');
+      return;
     }
-  };
+
+    // Success: clear the local state
+    setActiveRequest(null);
+  } catch (err) {
+    console.error('Failed to cancel request:', err);
+    setError('Failed to cancel request. Please try again.');
+  }
+};
 
   const timeAgo = (timestamp: string) => {
     const now = new Date();
@@ -395,9 +407,7 @@ export default function ConnectPage() {
               Post a request when you need to talk, or accept someone else&apos;s request to connect immediately.
             </p>
           </div>
-          <button onClick={() => router.push('/dashboard')} style={styles.iconButton}>
-            <X size={28} />
-          </button>
+          
         </div>
 
         {/* Active Request */}
