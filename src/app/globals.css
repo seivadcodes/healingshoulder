@@ -1,11 +1,10 @@
 /* src/app/globals.css */
 
-/* 1. Standard Tailwind directives (universally supported) */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 2. Critical mobile compatibility fixes */
+/* Optional: Add minimal global reset for maximum compatibility */
 *,
 *::before,
 *::after {
@@ -13,22 +12,13 @@
 }
 
 html {
-  /* Prevents font inflation on mobile browsers */
   -webkit-text-size-adjust: 100%;
-  /* Ensures 100% width/height works */
   height: 100%;
 }
 
 body {
-  /* Remove browser default margin */
   margin: 0;
-  /* Ensure full height */
   min-height: 100%;
-  /* Prevent tap highlights on mobile */
-  -webkit-tap-highlight-color: transparent;
-  /* Use system font for best mobile rendering */
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
-
-/* 3. Optional: preserve your background if used globally */
-/* But your layout.tsx already sets it via className, so this may be redundant */
