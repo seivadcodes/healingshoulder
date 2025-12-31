@@ -3,23 +3,25 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createSession } from '@/lib/matching';
+import { createClient } from '@/lib/supabase';
 
 // Mock live activity feed
 const mockLiveActivities = [
-  { id: 1, type: 'chat', message: 'Live Now: 3 people in “Grief Support Chat” — join anonymously.', action: 'Join' },
-  { id: 2, type: 'call', message: 'Someone just asked for a group call about “Coping with Holidays” — you can join.', action: 'Join Call' },
-  { id: 3, type: 'community', message: 'New member joined “Friends Who Understand” community.', action: 'See Post' },
-  { id: 4, type: 'event', message: 'Upcoming: “Mindfulness for Grief” workshop in 2 hours — reserve your spot.', action: 'Remind Me' },
-  { id: 5, type: 'game', message: 'Game Live: “Memory Garden” — 5 players building a digital memorial together. Join?', action: 'Play' },
-  { id: 6, type: 'post', message: 'Someone posted in “Loss of a Parent”: “I miss his laugh today.” — reply with a heart or share your story.', action: 'Respond' },
+  { id: 1, type: 'chat', message: 'Live Now: 3 people in "Grief Support Chat" — join anonymously.', action: 'Join' },
+  { id: 2, type: 'call', message: 'Someone just asked for a group call about "Coping with Holidays" — you can join.', action: 'Join Call' },
+  { id: 3, type: 'community', message: 'New member joined "Friends Who Understand" community.', action: 'See Post' },
+  { id: 4, type: 'event', message: 'Upcoming: "Mindfulness for Grief" workshop in 2 hours — reserve your spot.', action: 'Remind Me' },
+  { id: 5, type: 'game', message: 'Game Live: "Memory Garden" — 5 players building a digital memorial together. Join?', action: 'Play' },
+  { id: 6, type: 'post', message: 'Someone posted in "Loss of a Parent": "I miss his laugh today." — reply with a heart or share your story.', action: 'Respond' },
 ];
 
 export default function HomePage() {
   const router = useRouter();
   const [onlineCount, setOnlineCount] = useState(42);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isTalkingToSomeone, setIsTalkingToSomeone] = useState(false);
+  const [isTalkingToGroup, setIsTalkingToGroup] = useState(false);
   const heartbeatRef = useRef<HTMLDivElement>(null);
+  const supabase = createClient();
 
   // Simulate online count fluctuation
   useEffect(() => {
@@ -32,10 +34,9 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Manual heartbeat animation via JS (since inline styles can't do keyframes easily)
+  // Manual heartbeat animation via JS
   useEffect(() => {
     let pulseInterval: NodeJS.Timeout;
-    let pingInterval: NodeJS.Timeout;
 
     const startPulse = () => {
       if (!heartbeatRef.current) return;
@@ -48,26 +49,69 @@ export default function HomePage() {
     };
 
     pulseInterval = setInterval(startPulse, 4000);
-    pingInterval = setInterval(() => {
-      // Simulate ping glow by briefly changing box-shadow (optional)
-    }, 2000);
 
     return () => {
       clearInterval(pulseInterval);
-      clearInterval(pingInterval);
     };
   }, []);
 
-  const handleQuickConnect = async () => {
-    if (isConnecting) return;
-    setIsConnecting(true);
+  const handleTalkToSomeone = async () => {
+    if (isTalkingToSomeone || isTalkingToGroup) return;
+    setIsTalkingToSomeone(true);
+    
     try {
-      const session = await createSession();
-      router.push(`/call/${session.id}`);
+      // First check if user is authenticated
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        router.push('/auth');
+        return;
+      }
+
+      // Check if user has a profile
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profileError) {
+        // If no profile exists, redirect to profile creation
+        router.push('/setup-profile');
+        return;
+      }
+
+      // Redirect to the connect page which handles the matching logic
+      router.push('/connect');
+      
     } catch (error) {
-      console.error('Connection failed:', error);
-      alert('Unable to connect right now. Please try again.');
-      setIsConnecting(false);
+      console.error('Connection setup failed:', error);
+      alert('Unable to start connection right now. Please try again.');
+    } finally {
+      setIsTalkingToSomeone(false);
+    }
+  };
+
+  const handleTalkToGroup = async () => {
+    if (isTalkingToSomeone || isTalkingToGroup) return;
+    setIsTalkingToGroup(true);
+    
+    try {
+      // First check if user is authenticated
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        router.push('/auth');
+        return;
+      }
+
+      // For now, redirect to a groups page
+      // This would be expanded to handle actual group room creation/joining logic
+      router.push('/groups');
+      
+    } catch (error) {
+      console.error('Group connection failed:', error);
+      alert('Unable to join a group right now. Please try again.');
+    } finally {
+      setIsTalkingToGroup(false);
     }
   };
 
@@ -113,40 +157,70 @@ export default function HomePage() {
           </h1>
           <p style={{ color: '#44403c', fontSize: '1.125rem' }}>Right now.</p>
         </div>
-        {/* Optional: add subtle glow via box-shadow animation if needed — but inline can't animate easily */}
       </div>
 
-      {/* Primary Action Buttons */}
-      <div style={{ width: '100%', maxWidth: '32rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2.5rem' }}>
+      {/* Action Buttons */}
+      <div style={{ width: '100%', maxWidth: '32rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
         <button
-          onClick={handleQuickConnect}
-          disabled={isConnecting}
+          onClick={handleTalkToSomeone}
+          disabled={isTalkingToSomeone || isTalkingToGroup}
           style={{
             width: '100%',
             padding: '1rem',
-            backgroundColor: isConnecting ? '#fbbf24' : '#f59e0b',
-            color: isConnecting ? '#fef3c7' : 'white',
+            backgroundColor: isTalkingToSomeone ? '#fbbf24' : '#f59e0b',
+            color: isTalkingToSomeone ? '#fef3c7' : 'white',
             fontWeight: '600',
             borderRadius: '0.75rem',
             border: 'none',
-            cursor: isConnecting ? 'not-allowed' : 'pointer',
+            cursor: isTalkingToSomeone || isTalkingToGroup ? 'not-allowed' : 'pointer',
             boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
             transition: 'transform 0.2s, background-color 0.2s',
           }}
           onMouseEnter={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(1.02)';
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(1.02)';
           }}
           onMouseLeave={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(1)';
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(1)';
           }}
           onTouchStart={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(0.98)';
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(0.98)';
           }}
           onTouchEnd={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(1)';
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(1)';
           }}
         >
-          {isConnecting ? 'Finding someone...' : '🟠 Talk Now'}
+          {isTalkingToSomeone ? 'Finding someone...' : '🟠 Talk to Someone'}
+        </button>
+
+        <button
+          onClick={handleTalkToGroup}
+          disabled={isTalkingToSomeone || isTalkingToGroup}
+          style={{
+            width: '100%',
+            padding: '1rem',
+            backgroundColor: isTalkingToGroup ? '#93c5fd' : '#3b82f6',
+            color: isTalkingToGroup ? '#bfdbfe' : 'white',
+            fontWeight: '600',
+            borderRadius: '0.75rem',
+            border: 'none',
+            cursor: isTalkingToSomeone || isTalkingToGroup ? 'not-allowed' : 'pointer',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+            transition: 'transform 0.2s, background-color 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(1.02)';
+          }}
+          onMouseLeave={(e) => {
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(1)';
+          }}
+          onTouchStart={(e) => {
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(0.98)';
+          }}
+          onTouchEnd={(e) => {
+            if (!isTalkingToSomeone && !isTalkingToGroup) e.currentTarget.style.transform = 'scale(1)';
+          }}
+        >
+          {isTalkingToGroup ? 'Finding group...' : '🔵 Talk to a Group'}
         </button>
 
         <button
@@ -195,7 +269,7 @@ export default function HomePage() {
       {/* Live Activity Feed */}
       <div style={{ width: '100%', maxWidth: '32rem' }}>
         <h2 style={{ color: '#44403c', fontWeight: '600', marginBottom: '0.75rem', textAlign: 'left' }}>
-          What’s happening now
+          What's happening now
         </h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {mockLiveActivities.map((item) => (
@@ -220,10 +294,9 @@ export default function HomePage() {
               </span>
             </div>
           ))}
-        </div>
+        </div>a
       </div>
 
-      {/* Optional: global styles for pulse (if needed elsewhere) */}
       <style jsx>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }

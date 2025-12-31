@@ -12,13 +12,13 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 
 export async function POST(req: NextRequest) {
   try {
-    const { room, identity: userId } = await req.json(); // renamed for clarity
+    const { room, identity: userId } = await req.json();
 
     if (!room || !userId) {
       return NextResponse.json({ error: 'Missing room or identity' }, { status: 400 });
     }
 
-    // Validate user exists by ID (not username!)
+    // Validate user exists
     const supabase = createClient();
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -31,11 +31,16 @@ export async function POST(req: NextRequest) {
     }
 
     const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-      identity: userId, // use user.id
+      identity: userId,
       ttl: '10m',
     });
 
-    at.addGrant({ room, roomJoin: true, canPublish: true, canSubscribe: true });
+    at.addGrant({ 
+      room, 
+      roomJoin: true, 
+      canPublish: true, 
+      canSubscribe: true 
+    });
 
     const token = await at.toJwt();
 
