@@ -1,7 +1,6 @@
-// app/room/[id]/page.tsx — FULL UPDATED VERSION (with inline CSS)
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,6 +11,8 @@ import {
   Clock,
   AlertTriangle,
   User as UserIcon,
+  Users,
+  RefreshCw,
 } from 'lucide-react';
 import { Room, RoomEvent, Track, ConnectionState } from 'livekit-client';
 
@@ -36,15 +37,9 @@ type Profile = {
   full_name?: string;
   avatar_url?: string | null;
 };
-
-type RoomRecord = {
-  id: string;
-  room_id: string;
-  user_id: string;
-  acceptor_id: string | null;
-  status: string;
-};
-
+interface CallEndedMessage {
+  by: string;
+}
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -52,9 +47,19 @@ export default function RoomPage() {
   const supabase = createClient();
   const roomId = params.id as string;
 
+  // Detect room type from ID
+  const isGroupCall = typeof roomId === 'string' && roomId.startsWith('group-call-');
+  const isOneOnOne = typeof roomId === 'string' && roomId.startsWith('quick-connect-');
+
+  // Redirect if invalid room ID
+  useEffect(() => {
+    if (!authLoading && roomId && !isGroupCall && !isOneOnOne) {
+      router.push('/connect');
+    }
+  }, [authLoading, roomId, isGroupCall, isOneOnOne, router]);
+
   // State
   const [user, setUser] = useState<Profile | null>(null);
-  const [roomRecord, setRoomRecord] = useState<RoomRecord | null>(null);
   const [participants, setParticipants] = useState<{ id: string; name: string; avatar?: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,14 +68,15 @@ export default function RoomPage() {
   const [room, setRoom] = useState<Room | null>(null);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
-  const [remoteMuted, setRemoteMuted] = useState(false);
   const [callEndedByPeer, setCallEndedByPeer] = useState(false);
+  const [retryCount, setRetryCount] = useState(0); // Added for retry functionality
 
   // Refs
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const remoteAudioRefs = useRef<HTMLAudioElement[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const supabaseChannelRef = useRef<any>(null);
   const callDurationStartedRef = useRef(false);
+  const hasRetriedRef = useRef(false);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -80,15 +86,15 @@ export default function RoomPage() {
   }, [authUser, authLoading, router]);
 
   // Cleanup on unmount or leave
-  const cleanupCall = () => {
+  const cleanupCall = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    if (remoteAudioRef.current) {
-      document.body.removeChild(remoteAudioRef.current);
-      remoteAudioRef.current = null;
-    }
+    remoteAudioRefs.current.forEach((el) => {
+      if (el.parentElement) el.parentElement.removeChild(el);
+    });
+    remoteAudioRefs.current = [];
     if (supabaseChannelRef.current) {
       supabase.removeChannel(supabaseChannelRef.current);
       supabaseChannelRef.current = null;
@@ -96,13 +102,24 @@ export default function RoomPage() {
     setIsInCall(false);
     setCallDuration(0);
     callDurationStartedRef.current = false; 
-  };
+  }, [supabase]);
 
   // Initialize room & user
   useEffect(() => {
-    if (!authUser?.id || !roomId) return;
+    if (!authUser?.id || !roomId || (!isOneOnOne && !isGroupCall)) return;
 
+    let isMounted = true;
     const initialize = async () => {
+      // Reset states for retry
+      setIsLoading(true);
+      setError(null);
+      cleanupCall();
+      
+      if (room) {
+        room.disconnect();
+        setRoom(null);
+      }
+
       try {
         // Load user profile
         const { data: profile, error: profileErr } = await supabase
@@ -111,36 +128,50 @@ export default function RoomPage() {
           .eq('id', authUser.id)
           .single();
 
+        if (!isMounted) return;
         if (profileErr) throw profileErr;
         setUser(profile);
 
-        // Verify room access
-        const { data: roomData, error: roomErr } = await supabase
-          .from('quick_connect_requests')
-          .select('id, room_id, user_id, acceptor_id, status')
+        // Verify room exists AND user is authorized via room_participants
+        const roomTable = isOneOnOne ? 'quick_connect_requests' : 'quick_group_requests';
+        const { data: roomRecord, error: roomErr } = await supabase
+          .from(roomTable)
+          .select('room_id, status')
           .eq('room_id', roomId)
           .single();
 
-        if (roomErr || !roomData) throw new Error('Room not found');
-        if (roomData.status !== 'matched') throw new Error('Room is not active');
-        if (roomData.user_id !== authUser.id && roomData.acceptor_id !== authUser.id) {
-          throw new Error('Not authorized');
+        if (!isMounted) return;
+        if (roomErr || !roomRecord || roomRecord.status !== 'matched') {
+          throw new Error('Room not found or not active');
         }
 
-        setRoomRecord(roomData);
+        // Auth + participants: fetch from room_participants
+        const { data: participantRows, error: partErr } = await supabase
+          .from('room_participants')
+          .select('user_id')
+          .eq('room_id', roomId)
+          .eq('active', true);
 
-        // Load participant profiles
-        const ids = roomData.acceptor_id
-          ? [roomData.user_id, roomData.acceptor_id]
-          : [roomData.user_id];
+        if (!isMounted) return;
+        if (partErr) throw partErr;
+
+        const participantIds = participantRows.map(p => p.user_id);
+
+        // Ensure current user is in the room
+        if (!participantIds.includes(authUser.id)) {
+          throw new Error('Not authorized to join this room');
+        }
 
         const { data: profiles, error: profilesErr } = await supabase
           .from('profiles')
           .select('id, full_name, avatar_url')
-          .in('id', ids);
+          .in('id', participantIds);
+
+        if (!isMounted) return;
+        if (profilesErr) throw profilesErr;
 
         const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
-        const parts = ids.map(id => {
+        const parts = participantIds.map(id => {
           const p = profileMap.get(id);
           return {
             id,
@@ -155,10 +186,9 @@ export default function RoomPage() {
         const channelName = `room:${roomId}`;
         const channel = supabase
           .channel(channelName)
-          .on('broadcast', { event: 'call_ended' }, (payload) => {
+          .on('broadcast', { event: 'call_ended' }, (payload: { payload: CallEndedMessage }) => {
             console.log('Received call_ended signal from peer');
             setCallEndedByPeer(true);
-            // We'll handle disconnection in the main effect below
           })
           .subscribe();
 
@@ -166,130 +196,121 @@ export default function RoomPage() {
 
         // Join LiveKit room
         await joinLiveKitRoom(roomId, authUser.id);
-
       } catch (err: any) {
+        if (!isMounted) return;
         console.error('Init error:', err);
         setError(err.message || 'Failed to join room');
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     initialize();
 
     return () => {
+      isMounted = false;
       cleanupCall();
       if (room) room.disconnect();
     };
-  }, [roomId, authUser?.id]);
+  }, [roomId, authUser?.id, isOneOnOne, isGroupCall, retryCount, cleanupCall, room, supabase]);
 
   const joinLiveKitRoom = async (roomName: string, identity: string) => {
-  const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
-  if (!livekitUrl) {
-    setError('LiveKit URL not configured');
-    return;
-  }
+    const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+    if (!livekitUrl) {
+      setError('LiveKit URL not configured');
+      return;
+    }
 
-  const newRoom = new Room();
-  setRoom(newRoom);
+    const newRoom = new Room();
+    setRoom(newRoom);
 
-  // Helper: Check if any remote participant has an active, subscribed audio track
-  const hasActiveRemoteAudio = () => {
-    for (const participant of newRoom.remoteParticipants.values()) {
-      for (const pub of participant.audioTrackPublications.values()) {
-        if (pub.isSubscribed && pub.track) {
-          return true;
+    const hasActiveRemoteAudio = () => {
+      for (const participant of newRoom.remoteParticipants.values()) {
+        for (const pub of participant.audioTrackPublications.values()) {
+          if (pub.isSubscribed && pub.track) {
+            return true;
+          }
         }
       }
-    }
-    return false;
-  };
+      return false;
+    };
 
-  // Helper: Start the timer only once when real audio exchange begins
-  const startCallTimer = () => {
-    if (callDurationStartedRef.current) return;
-    callDurationStartedRef.current = true;
-    setCallDuration(0);
-    intervalRef.current = setInterval(() => {
-      setCallDuration((prev) => prev + 1);
-    }, 1000);
-  };
+    const startCallTimer = () => {
+      if (callDurationStartedRef.current) return;
+      callDurationStartedRef.current = true;
+      setCallDuration(0);
+      intervalRef.current = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    };
 
-  // Main trigger to evaluate if call should start
-  const checkAndStartCall = () => {
-    if (!callDurationStartedRef.current && hasActiveRemoteAudio()) {
-      startCallTimer();
-    }
-  };
-
-  // Handle incoming remote audio
-  newRoom.on(RoomEvent.TrackSubscribed, (track) => {
-    if (track.kind === Track.Kind.Audio) {
-      const element = track.attach();
-      element.autoplay = true;
-      element.muted = false;
-      element.volume = 1.0;
-
-      if (remoteAudioRef.current) {
-        document.body.removeChild(remoteAudioRef.current);
+    const checkAndStartCall = () => {
+      if (!callDurationStartedRef.current && hasActiveRemoteAudio()) {
+        startCallTimer();
       }
-      remoteAudioRef.current = element;
-      document.body.appendChild(element);
-      setRemoteMuted(false);
+    };
 
-      // 🔥 Now that we have live audio, check if timer should start
-      checkAndStartCall();
-    }
-  });
+    newRoom.on(RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind === Track.Kind.Audio) {
+        const element = track.attach();
+        element.autoplay = true;
+        element.muted = false;
+        element.volume = 1.0;
+        remoteAudioRefs.current.push(element);
+        document.body.appendChild(element);
+        checkAndStartCall();
+      }
+    });
 
-  newRoom.on(RoomEvent.TrackUnsubscribed, () => {
-    setRemoteMuted(true);
-  });
+    newRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
+      const index = remoteAudioRefs.current.indexOf(track as any);
+      if (index > -1) {
+        const el = remoteAudioRefs.current.splice(index, 1)[0];
+        if (el.parentElement) el.parentElement.removeChild(el);
+      }
+    });
 
-  // Optional: Re-check if someone reconnects and publishes audio later
-  newRoom.on(RoomEvent.ParticipantConnected, () => {
-    // Audio may publish shortly after connect—defer check slightly
-    setTimeout(checkAndStartCall, 500);
-  });
+    newRoom.on(RoomEvent.ParticipantConnected, () => {
+      setTimeout(checkAndStartCall, 500);
+    });
 
-  // Also check on initial connect (in case remote was already there)
-  newRoom.on(RoomEvent.Connected, () => {
-    setTimeout(checkAndStartCall, 500);
-  });
+    newRoom.on(RoomEvent.Connected, () => {
+      setTimeout(checkAndStartCall, 500);
+    });
 
-  // Cleanup on disconnect
-  newRoom.on(RoomEvent.Disconnected, cleanupCall);
-  newRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
-    if (state === ConnectionState.Disconnected) {
+    newRoom.on(RoomEvent.Disconnected, cleanupCall);
+    newRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+      if (state === ConnectionState.Disconnected) {
+        cleanupCall();
+      }
+    });
+
+    try {
+      const tokenRes = await fetch('/api/livekit/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: roomName, identity }),
+      });
+
+      if (!tokenRes.ok) throw new Error(`Token error: ${tokenRes.status}`);
+      const { token } = await tokenRes.json();
+
+      await newRoom.connect(livekitUrl, token);
+
+      const tracks = await newRoom.localParticipant.createTracks({ audio: true });
+      tracks.forEach((track) => {
+        newRoom.localParticipant.publishTrack(track);
+      });
+
+      setIsInCall(true);
+    } catch (err: any) {
+      console.error('LiveKit join error:', err);
+      setError(`Call failed: ${err.message}`);
       cleanupCall();
     }
-  });
-
-  try {
-    const tokenRes = await fetch('/api/livekit/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room: roomName, identity }),
-    });
-
-    if (!tokenRes.ok) throw new Error(`Token error: ${tokenRes.status}`);
-    const { token } = await tokenRes.json();
-
-    await newRoom.connect(livekitUrl, token);
-
-    // Publish local audio
-    const tracks = await newRoom.localParticipant.createTracks({ audio: true });
-    tracks.forEach((track) => {
-      newRoom.localParticipant.publishTrack(track);
-    });
-
-    setIsInCall(true);
-  } catch (err: any) {
-    console.error('LiveKit join error:', err);
-    setError(`Call failed: ${err.message}`);
-    cleanupCall();
-  }
-};
+  };
 
   const toggleAudio = () => {
     if (!room) return;
@@ -310,16 +331,15 @@ export default function RoomPage() {
 
     try {
       if (endedByUser) {
-        // Broadcast that this user is ending the call
         await supabaseChannelRef.current?.send({
           type: 'broadcast',
           event: 'call_ended',
           payload: { by: authUser?.id },
         });
 
-        // Update DB status to 'completed'
+        const table = isOneOnOne ? 'quick_connect_requests' : 'quick_group_requests';
         await supabase
-          .from('quick_connect_requests')
+          .from(table)
           .update({ status: 'completed' })
           .eq('room_id', roomId);
       }
@@ -337,7 +357,6 @@ export default function RoomPage() {
     }
   };
 
-  // Handle peer ending the call
   useEffect(() => {
     if (callEndedByPeer && isInCall) {
       console.log('Peer ended the call. Disconnecting...');
@@ -352,6 +371,11 @@ export default function RoomPage() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleRetry = () => {
+    setRetryCount(prev => prev + 1);
+    hasRetriedRef.current = true;
   };
 
   // Loading
@@ -393,6 +417,7 @@ export default function RoomPage() {
         justifyContent: 'center',
         padding: '1rem'
       }}>
+        <Keyframes />
         <div style={{
           background: '#ffffff',
           borderRadius: '0.75rem',
@@ -400,8 +425,32 @@ export default function RoomPage() {
           padding: '2rem',
           maxWidth: '28rem',
           width: '100%',
-          textAlign: 'center'
+          textAlign: 'center',
+          position: 'relative'
         }}>
+          {/* Retry indicator animation */}
+          {hasRetriedRef.current && (
+            <div style={{
+              position: 'absolute',
+              top: '-12px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: '#fffbeb',
+              border: '1px solid #f59e0b',
+              borderRadius: '9999px',
+              padding: '0.25rem 0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              animation: 'pulse 2s infinite'
+            }}>
+              <RefreshCw size={14} style={{ color: '#f59e0b' }} />
+              <span style={{ color: '#92400e', fontSize: '0.75rem', fontWeight: '500' }}>
+                Retrying connection...
+              </span>
+            </div>
+          )}
+          
           <div style={{
             width: '4rem',
             height: '4rem',
@@ -414,34 +463,99 @@ export default function RoomPage() {
           }}>
             <AlertTriangle size={32} style={{ color: '#ef4444' }} />
           </div>
+          
           <h2 style={{
             fontSize: '1.5rem',
             fontWeight: '700',
             color: '#292524',
-            marginBottom: '0.75rem'
-          }}>Connection Issue</h2>
-          <p style={{ color: '#57534e', marginBottom: '1.5rem' }}>{error}</p>
-          <button
-            onClick={() => router.push('/connect')}
-            style={{
-              background: '#f59e0b',
-              color: '#ffffff',
-              fontWeight: '700',
-              padding: '0.75rem 1.5rem',
-              borderRadius: '9999px',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.background = '#d97706'}
-            onMouseOut={(e) => e.currentTarget.style.background = '#f59e0b'}
-          >
-            Return to Connections
-          </button>
+            marginBottom: '0.5rem'
+          }}>Connection Failed</h2>
+          
+          <p style={{ 
+            color: '#57534e', 
+            marginBottom: '1.5rem',
+            minHeight: '3rem'
+          }}>
+            {error}
+          </p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <button
+              onClick={handleRetry}
+              disabled={hasRetriedRef.current}
+              style={{
+                background: hasRetriedRef.current ? '#e5e7eb' : '#f59e0b',
+                color: hasRetriedRef.current ? '#9ca3af' : '#ffffff',
+                fontWeight: '700',
+                padding: '0.75rem 1.5rem',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: hasRetriedRef.current ? 'not-allowed' : 'pointer',
+                transition: 'background-color 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                width: '100%'
+              }}
+              onMouseOver={(e) => {
+                if (!hasRetriedRef.current) {
+                  e.currentTarget.style.background = '#d97706';
+                }
+              }}
+              onMouseOut={(e) => {
+                if (!hasRetriedRef.current) {
+                  e.currentTarget.style.background = '#f59e0b';
+                }
+              }}
+            >
+              {hasRetriedRef.current ? (
+                <>
+                  <div style={{
+                    animation: 'spin 1s linear infinite',
+                    borderRadius: '9999px',
+                    height: '16px',
+                    width: '16px',
+                    border: '2px solid transparent',
+                    borderLeftColor: '#9ca3af'
+                  }}></div>
+                  Please wait...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={18} />
+                  Try Again
+                </>
+              )}
+            </button>
+            
+            <button
+              onClick={() => router.push('/connect')}
+              style={{
+                background: 'transparent',
+                color: '#57534e',
+                fontWeight: '600',
+                padding: '0.5rem',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'color 0.2s',
+                width: '100%'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.color = '#292524'}
+              onMouseOut={(e) => e.currentTarget.style.color = '#57534e'}
+            >
+              Return to Connections
+            </button>
+          </div>
         </div>
       </div>
     );
   }
+
+  // Determine participant display
+  const otherParticipants = participants.filter(p => p.id !== user?.id);
+  const isGroup = isGroupCall || otherParticipants.length > 1;
 
   // Main UI
   return (
@@ -453,9 +567,7 @@ export default function RoomPage() {
     }}>
       <Keyframes />
       <div style={{ maxWidth: '42rem', margin: '0 auto' }}>
-       
-
-                          <div style={{
+        <div style={{
           background: '#ffffff',
           borderRadius: '0.75rem',
           border: '1px solid #e7e5e4',
@@ -463,7 +575,7 @@ export default function RoomPage() {
           marginBottom: '1.5rem',
           textAlign: 'center'
         }}>
-          {/* Name of the other participant */}
+          {/* Name of the other participant or group label */}
           <h2 style={{
             fontSize: '1.25rem',
             fontWeight: '700',
@@ -473,10 +585,14 @@ export default function RoomPage() {
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap'
           }}>
-            {(() => {
-              const other = participants.find(p => p.id !== user?.id);
-              return other ? other.name : 'Anonymous';
-            })()}
+            {isGroup ? (
+              <>
+                <Users size={18} style={{ marginRight: '0.25rem' }} />
+                Group Call
+              </>
+            ) : (
+              otherParticipants[0]?.name || 'Anonymous'
+            )}
           </h2>
 
           {/* Timer */}
@@ -507,19 +623,14 @@ export default function RoomPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            margin: '0 auto 15rem auto' // ← Increased from 1rem to 2rem for more breathing room
+            margin: '0 auto 15rem auto'
           }}>
-            <UserIcon size={40} style={{ color: '#b45309' }} />
+            {isGroup ? (
+              <Users size={40} style={{ color: '#b45309' }} />
+            ) : (
+              <UserIcon size={40} style={{ color: '#b45309' }} />
+            )}
           </div>
-
-          {/* Status message (e.g., "Other participant muted") */}
-          <p style={{ 
-            color: '#57534e', 
-            marginBottom: '1.25rem',
-            minHeight: '1.25rem'
-          }}>
-            {remoteMuted ? 'Other participant muted' : ''}
-          </p>
 
           {/* Call Controls: Mute + Leave */}
           <div style={{
@@ -577,7 +688,7 @@ export default function RoomPage() {
               {isAudioEnabled ? 'Mute' : 'Unmute'}
             </button>
 
-            {/* Leave Button — RED like original */}
+            {/* Leave Button */}
             <button
               onClick={() => leaveRoom(true)}
               disabled={isLeaving || callEndedByPeer}
@@ -591,10 +702,10 @@ export default function RoomPage() {
                 transition: 'background-color 0.2s',
                 backgroundColor: isLeaving || callEndedByPeer 
                   ? '#e7e5e4' 
-                  : '#fef2f2', // ← Light red background, matches mockup
+                  : '#fef2f2',
                 color: isLeaving || callEndedByPeer 
                   ? '#9ca3af' 
-                  : '#dc2626', // ← Strong red text
+                  : '#dc2626',
                 cursor: isLeaving || callEndedByPeer ? 'not-allowed' : 'pointer',
                 border: 'none',
                 fontWeight: '600',
@@ -603,7 +714,7 @@ export default function RoomPage() {
               }}
               onMouseOver={(e) => {
                 if (isLeaving || callEndedByPeer) return;
-                e.currentTarget.style.background = '#fecaca'; // hover state
+                e.currentTarget.style.background = '#fecaca';
               }}
               onMouseOut={(e) => {
                 if (isLeaving || callEndedByPeer) return;
@@ -620,16 +731,12 @@ export default function RoomPage() {
                   borderLeftColor: '#dc2626'
                 }}></div>
               ) : (
-                <PhoneOff size={16} style={{ color: '#dc2626' }} /> // Optional: force red icon
+                <PhoneOff size={16} style={{ color: '#dc2626' }} />
               )}
-              <span style={{ color: '#dc2626' }}>Leave</span> {/* Explicitly set red text */}
+              <span style={{ color: '#dc2626' }}>Leave</span>
             </button>
           </div>
         </div>
-        
-
-        
-         
       </div>
     </div>
   );
