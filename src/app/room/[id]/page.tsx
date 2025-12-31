@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
@@ -27,9 +27,6 @@ const Keyframes = () => (
         50% { opacity: 0.5; }
         100% { opacity: 1; }
       }
-      .pulse {
-        animation: pulse 1.5s infinite;
-      }
     `}</style>
   </>
 );
@@ -39,20 +36,9 @@ type Profile = {
   full_name?: string;
   avatar_url?: string | null;
 };
-
-type RoomParticipant = {
-  user_id: string;
-};
-
-type RoomRecord = {
-  room_id: string;
-  status: string;
-};
-
 interface CallEndedMessage {
   by: string;
 }
-
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -82,14 +68,12 @@ export default function RoomPage() {
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
   const [callEndedByPeer, setCallEndedByPeer] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
 
   // Refs
-  const remoteAudioRefs = useRef<(HTMLAudioElement | null)[]>([]);
+  const remoteAudioRefs = useRef<HTMLAudioElement[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const supabaseChannelRef = useRef<any>(null);
   const callDurationStartedRef = useRef(false);
-  const hasInitializedRef = useRef(false);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -99,15 +83,13 @@ export default function RoomPage() {
   }, [authUser, authLoading, router]);
 
   // Cleanup on unmount or leave
-  const cleanupCall = useCallback(() => {
+  const cleanupCall = () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
     remoteAudioRefs.current.forEach((el) => {
-      if (el && el.parentElement) {
-        el.parentElement.removeChild(el);
-      }
+      if (el.parentElement) el.parentElement.removeChild(el);
     });
     remoteAudioRefs.current = [];
     if (supabaseChannelRef.current) {
@@ -116,78 +98,59 @@ export default function RoomPage() {
     }
     setIsInCall(false);
     setCallDuration(0);
-    callDurationStartedRef.current = false;
-    setConnectionStatus('disconnected');
-  }, [supabase]);
+    callDurationStartedRef.current = false; 
+  };
 
   // Initialize room & user
   useEffect(() => {
-    if (!authUser?.id || !roomId || (!isOneOnOne && !isGroupCall) || hasInitializedRef.current) return;
-    
-    hasInitializedRef.current = true;
-    setIsLoading(true);
-    setError(null);
-    setConnectionStatus('connecting');
+    if (!authUser?.id || !roomId || (!isOneOnOne && !isGroupCall)) return;
 
     const initialize = async () => {
       try {
-        // Run critical queries in parallel
-        const roomTable = isOneOnOne ? 'quick_connect_requests' : 'quick_group_requests';
-        
-        const [profileResult, roomCheckResult] = await Promise.all([
-          supabase
-            .from('profiles')
-            .select('id, full_name, avatar_url')
-            .eq('id', authUser.id)
-            .single<Profile>(),
-          
-          supabase
-            .from(roomTable)
-            .select('room_id, status')
-            .eq('room_id', roomId)
-            .single<RoomRecord>()
-        ]);
+        // Load user profile
+        const { data: profile, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .eq('id', authUser.id)
+          .single();
 
-        // Handle profile result
-        if (profileResult.error) throw profileResult.error;
-        setUser(profileResult.data);
+        if (profileErr) throw profileErr;
+        setUser(profile);
 
-        // Handle room check result
-        if (roomCheckResult.error || !roomCheckResult.data || roomCheckResult.data.status !== 'matched') {
-          throw new Error('Room not found or not active');
-        }
+       // ✅ NEW: Verify room exists AND user is authorized via room_participants
+const roomTable = isOneOnOne ? 'quick_connect_requests' : 'quick_group_requests';
+const { data: roomRecord, error: roomErr } = await supabase
+  .from(roomTable)
+  .select('room_id, status')
+  .eq('room_id', roomId)
+  .single();
 
-        // Get participant IDs
-        const { data: participantRows, error: partErr } = await supabase
-          .from('room_participants')
-          .select('user_id')
-          .eq('room_id', roomId)
-          .eq('active', true)
-          .returns<RoomParticipant[]>();
+if (roomErr || !roomRecord || roomRecord.status !== 'matched') {
+  throw new Error('Room not found or not active');
+}
 
-        if (partErr) throw partErr;
+// ✅ Auth + participants: fetch from room_participants
+const { data: participantRows, error: partErr } = await supabase
+  .from('room_participants')
+  .select('user_id')
+  .eq('room_id', roomId)
+  .eq('active', true);
 
-        const participantIds = participantRows.map(p => p.user_id);
-        
-        // Ensure current user is authorized
-        if (!participantIds.includes(authUser.id)) {
-          throw new Error('Not authorized to join this room');
-        }
+if (partErr) throw partErr;
 
-        // Get profiles for participants
+const participantIds = participantRows.map(p => p.user_id);
+
+// Ensure current user is in the room
+if (!participantIds.includes(authUser.id)) {
+  throw new Error('Not authorized to join this room');
+}
+
         const { data: profiles, error: profilesErr } = await supabase
           .from('profiles')
           .select('id, full_name, avatar_url')
-          .in('id', participantIds)
-          .returns<Profile[]>();
+          .in('id', participantIds);
 
-        if (profilesErr) throw profilesErr;
-
-        // Create participant profiles map
-        const profileMap = new Map(
-          profiles.map(p => [p.id, p])
-        );
-
+        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
         const parts = participantIds.map(id => {
           const p = profileMap.get(id);
           return {
@@ -199,17 +162,25 @@ export default function RoomPage() {
 
         setParticipants(parts);
 
-        // Setup Supabase channel (non-blocking)
-        setupSupabaseChannel(roomId);
+        // Set up Supabase Realtime channel for this room
+        const channelName = `room:${roomId}`;
+    const channel = supabase
+  .channel(channelName)
+  .on('broadcast', { event: 'call_ended' }, (payload: { payload: CallEndedMessage }) => {
+    console.log('Received call_ended signal from peer');
+    setCallEndedByPeer(true);
+  })
+  .subscribe();
 
-        // Connect to LiveKit (non-blocking UI)
-        setIsLoading(false);
-        setConnectionStatus('connecting');
+        supabaseChannelRef.current = channel;
+
+        // Join LiveKit room
         await joinLiveKitRoom(roomId, authUser.id);
-        
+
       } catch (err: any) {
         console.error('Init error:', err);
         setError(err.message || 'Failed to join room');
+      } finally {
         setIsLoading(false);
       }
     };
@@ -220,20 +191,7 @@ export default function RoomPage() {
       cleanupCall();
       if (room) room.disconnect();
     };
-  }, [roomId, authUser?.id, isOneOnOne, isGroupCall, cleanupCall, supabase, room]);
-
-  const setupSupabaseChannel = useCallback((roomId: string) => {
-    const channelName = `room:${roomId}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('broadcast', { event: 'call_ended' }, (payload: { payload: CallEndedMessage }) => {
-        console.log('Received call_ended signal from peer');
-        setCallEndedByPeer(true);
-      })
-      .subscribe();
-
-    supabaseChannelRef.current = channel;
-  }, [supabase]);
+  }, [roomId, authUser?.id, isOneOnOne, isGroupCall]);
 
   const joinLiveKitRoom = async (roomName: string, identity: string) => {
     const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
@@ -244,12 +202,11 @@ export default function RoomPage() {
 
     const newRoom = new Room();
     setRoom(newRoom);
-    setConnectionStatus('connecting');
 
     const hasActiveRemoteAudio = () => {
       for (const participant of newRoom.remoteParticipants.values()) {
-        for (const publication of participant.audioTrackPublications.values()) {
-          if (publication.isSubscribed && publication.track) {
+        for (const pub of participant.audioTrackPublications.values()) {
+          if (pub.isSubscribed && pub.track) {
             return true;
           }
         }
@@ -285,18 +242,11 @@ export default function RoomPage() {
     });
 
     newRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
-      const elements = track.detach();
-      elements.forEach(element => {
-        const index = remoteAudioRefs.current.findIndex(el => el === element);
-        if (index > -1) {
-          remoteAudioRefs.current[index] = null;
-          if (element.parentElement) {
-            element.parentElement.removeChild(element);
-          }
-        }
-      });
-      // Clean up null references
-      remoteAudioRefs.current = remoteAudioRefs.current.filter(el => el !== null);
+      const index = remoteAudioRefs.current.indexOf(track as any);
+      if (index > -1) {
+        const el = remoteAudioRefs.current.splice(index, 1)[0];
+        if (el.parentElement) el.parentElement.removeChild(el);
+      }
     });
 
     newRoom.on(RoomEvent.ParticipantConnected, () => {
@@ -304,15 +254,12 @@ export default function RoomPage() {
     });
 
     newRoom.on(RoomEvent.Connected, () => {
-      setConnectionStatus('connected');
-      setIsInCall(true);
       setTimeout(checkAndStartCall, 500);
     });
 
     newRoom.on(RoomEvent.Disconnected, cleanupCall);
     newRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
       if (state === ConnectionState.Disconnected) {
-        setConnectionStatus('disconnected');
         cleanupCall();
       }
     });
@@ -334,6 +281,7 @@ export default function RoomPage() {
         newRoom.localParticipant.publishTrack(track);
       });
 
+      setIsInCall(true);
     } catch (err: any) {
       console.error('LiveKit join error:', err);
       setError(`Call failed: ${err.message}`);
@@ -343,7 +291,7 @@ export default function RoomPage() {
 
   const toggleAudio = () => {
     if (!room) return;
-    const localAudioTrack = Array.from(room.localParticipant.audioTrackPublications.values())[0]?.track;
+    const localAudioTrack = room.localParticipant.audioTrackPublications.values().next().value?.track;
     if (localAudioTrack) {
       if (isAudioEnabled) {
         localAudioTrack.mute();
@@ -359,8 +307,8 @@ export default function RoomPage() {
     setIsLeaving(true);
 
     try {
-      if (endedByUser && supabaseChannelRef.current) {
-        await supabaseChannelRef.current.send({
+      if (endedByUser) {
+        await supabaseChannelRef.current?.send({
           type: 'broadcast',
           event: 'call_ended',
           payload: { by: authUser?.id },
@@ -389,9 +337,12 @@ export default function RoomPage() {
   useEffect(() => {
     if (callEndedByPeer && isInCall) {
       console.log('Peer ended the call. Disconnecting...');
-      leaveRoom(false);
+      if (room) room.disconnect();
+      setTimeout(() => {
+        router.push('/connect');
+      }, 1000);
     }
-  }, [callEndedByPeer, isInCall, leaveRoom]);
+  }, [callEndedByPeer, isInCall, room, router]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -399,7 +350,7 @@ export default function RoomPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Loading state with better feedback
+  // Loading
   if (authLoading || isLoading) {
     return (
       <div style={{
@@ -421,20 +372,13 @@ export default function RoomPage() {
             borderLeftColor: '#f59e0b',
             margin: '0 auto 1rem auto'
           }}></div>
-          <p style={{ color: '#57534e', fontWeight: 500 }}>
-            {connectionStatus === 'connecting' 
-              ? 'Connecting to call...' 
-              : 'Preparing your call...'}
-          </p>
-          <p className="pulse" style={{ color: '#92400e', fontSize: '0.875rem', marginTop: '0.5rem' }}>
-            This should only take a few seconds
-          </p>
+          <p style={{ color: '#57534e' }}>Joining room...</p>
         </div>
       </div>
     );
   }
 
-  // Error state
+  // Error
   if (error) {
     return (
       <div style={{
@@ -515,44 +459,8 @@ export default function RoomPage() {
           border: '1px solid #e7e5e4',
           padding: '2rem',
           marginBottom: '1.5rem',
-          textAlign: 'center',
-          position: 'relative'
+          textAlign: 'center'
         }}>
-          {/* Connection status badge */}
-          <div style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            padding: '0.25rem 0.75rem',
-            borderRadius: '9999px',
-            background: connectionStatus === 'connected' 
-              ? '#dcfce7' 
-              : connectionStatus === 'connecting' 
-                ? '#ffedd5' 
-                : '#fee2e2',
-            color: connectionStatus === 'connected' 
-              ? '#166534' 
-              : connectionStatus === 'connecting' 
-                ? '#92400e' 
-                : '#b91c1c',
-            fontSize: '0.75rem',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.25rem'
-          }}>
-            {connectionStatus === 'connected' && '●'}
-            {connectionStatus === 'connecting' && (
-              <span style={{ animation: 'spin 1s linear infinite' }}>◯</span>
-            )}
-            {connectionStatus === 'disconnected' && '⨯'}
-            {connectionStatus === 'connected' 
-              ? 'Connected' 
-              : connectionStatus === 'connecting' 
-                ? 'Connecting...' 
-                : 'Disconnected'}
-          </div>
-
           {/* Name of the other participant or group label */}
           <h2 style={{
             fontSize: '1.25rem',
@@ -592,7 +500,7 @@ export default function RoomPage() {
             </span>
           </div>
 
-          {/* Human head icon */}
+          {/* Human head icon BELOW timer — your exact style */}
           <div style={{
             width: '5rem',
             height: '5rem',
@@ -601,7 +509,7 @@ export default function RoomPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            margin: '0 auto 1.5rem auto'
+            margin: '0 auto 15rem auto' // ← Your original 15rem (creates large breathing room)
           }}>
             {isGroup ? (
               <Users size={40} style={{ color: '#b45309' }} />
@@ -614,26 +522,9 @@ export default function RoomPage() {
           <p style={{ 
             color: '#57534e', 
             marginBottom: '1.25rem',
-            minHeight: '1.25rem',
-            fontSize: '0.875rem'
+            minHeight: '1.25rem'
           }}>
-            {connectionStatus === 'connected' && (
-              <span style={{ color: '#166534', fontWeight: 500 }}>
-                {isGroup 
-                  ? `${participants.length} participants connected` 
-                  : 'Call connected'}
-              </span>
-            )}
-            {connectionStatus === 'connecting' && (
-              <span className="pulse" style={{ color: '#92400e' }}>
-                Establishing connection...
-              </span>
-            )}
-            {callEndedByPeer && (
-              <span style={{ color: '#b91c1c', fontWeight: 500 }}>
-                Call ended by other participant
-              </span>
-            )}
+            {/* Optional: show participant count for groups later */}
           </p>
 
           {/* Call Controls: Mute + Leave */}
@@ -646,7 +537,7 @@ export default function RoomPage() {
             {/* Mute Button */}
             <button
               onClick={toggleAudio}
-              disabled={!isInCall || callEndedByPeer || connectionStatus !== 'connected'}
+              disabled={!isInCall || callEndedByPeer}
               style={{
                 padding: '0.625rem 1.25rem',
                 borderRadius: '9999px',
@@ -654,32 +545,45 @@ export default function RoomPage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                transition: 'all 0.2s',
-                backgroundColor: !isInCall || callEndedByPeer || connectionStatus !== 'connected'
+                transition: 'background-color 0.2s',
+                backgroundColor: !isInCall || callEndedByPeer 
                   ? '#f5f5f4' 
                   : isAudioEnabled 
                     ? '#f0fdf4' 
                     : '#fef2f2',
-                color: !isInCall || callEndedByPeer || connectionStatus !== 'connected'
+                color: !isInCall || callEndedByPeer 
                   ? '#9ca3af' 
                   : isAudioEnabled 
                     ? '#047857' 
                     : '#dc2626',
-                cursor: !isInCall || callEndedByPeer || connectionStatus !== 'connected' 
-                  ? 'not-allowed' 
-                  : 'pointer',
+                cursor: !isInCall || callEndedByPeer ? 'not-allowed' : 'pointer',
                 border: 'none',
                 fontWeight: '600',
                 fontSize: '0.875rem',
-                minWidth: '90px',
-                opacity: (!isInCall || callEndedByPeer || connectionStatus !== 'connected') ? 0.7 : 1
+                minWidth: '90px'
+              }}
+              onMouseOver={(e) => {
+                if (!isInCall || callEndedByPeer) return;
+                if (isAudioEnabled) {
+                  e.currentTarget.style.background = '#d1fae5';
+                } else {
+                  e.currentTarget.style.background = '#fecaca';
+                }
+              }}
+              onMouseOut={(e) => {
+                if (!isInCall || callEndedByPeer) return;
+                if (isAudioEnabled) {
+                  e.currentTarget.style.background = '#f0fdf4';
+                } else {
+                  e.currentTarget.style.background = '#fef2f2';
+                }
               }}
             >
               {isAudioEnabled ? <Mic size={16} /> : <MicOff size={16} />}
               {isAudioEnabled ? 'Mute' : 'Unmute'}
             </button>
 
-            {/* Leave Button */}
+            {/* Leave Button — RED like original */}
             <button
               onClick={() => leaveRoom(true)}
               disabled={isLeaving || callEndedByPeer}
@@ -690,19 +594,26 @@ export default function RoomPage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                transition: 'all 0.2s',
-                backgroundColor: isLeaving || callEndedByPeer
+                transition: 'background-color 0.2s',
+                backgroundColor: isLeaving || callEndedByPeer 
                   ? '#e7e5e4' 
                   : '#fef2f2',
-                color: isLeaving || callEndedByPeer
+                color: isLeaving || callEndedByPeer 
                   ? '#9ca3af' 
                   : '#dc2626',
                 cursor: isLeaving || callEndedByPeer ? 'not-allowed' : 'pointer',
                 border: 'none',
                 fontWeight: '600',
                 fontSize: '0.875rem',
-                minWidth: '90px',
-                opacity: (isLeaving || callEndedByPeer) ? 0.7 : 1
+                minWidth: '90px'
+              }}
+              onMouseOver={(e) => {
+                if (isLeaving || callEndedByPeer) return;
+                e.currentTarget.style.background = '#fecaca';
+              }}
+              onMouseOut={(e) => {
+                if (isLeaving || callEndedByPeer) return;
+                e.currentTarget.style.background = '#fef2f2';
               }}
             >
               {isLeaving ? (
@@ -715,9 +626,9 @@ export default function RoomPage() {
                   borderLeftColor: '#dc2626'
                 }}></div>
               ) : (
-                <PhoneOff size={16} />
+                <PhoneOff size={16} style={{ color: '#dc2626' }} />
               )}
-              Leave
+              <span style={{ color: '#dc2626' }}>Leave</span>
             </button>
           </div>
         </div>
