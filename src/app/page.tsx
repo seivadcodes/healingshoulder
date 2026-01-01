@@ -294,7 +294,7 @@ export default function HomePage() {
               </span>
             </div>
           ))}
-        </div>a
+        </div>
       </div>
 
       <style jsx>{`

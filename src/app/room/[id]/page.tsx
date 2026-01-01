@@ -12,7 +12,19 @@ export default function RoomPage() {
   const {
     isLoading,
     error,
-    ...logic
+    user,
+    participants,
+    otherParticipants,
+    isInCall,
+    callEndedByPeer,
+    isLeaving,
+    isAudioEnabled,
+    toggleAudio,
+    leaveRoom,
+    callDuration,
+    formatDuration,
+    isGroupCall,
+    hostId, // ✅ Get hostId from hook
   } = useRoomLogic(roomId);
 
   if (isLoading) {
@@ -44,16 +56,20 @@ export default function RoomPage() {
 
   return (
     <RoomUI
-      isGroup={logic.isGroupCall || logic.otherParticipants.length > 1}
-      otherParticipants={logic.otherParticipants}
-      callDuration={logic.callDuration}
-      formatDuration={logic.formatDuration}
-      isInCall={logic.isInCall}
-      callEndedByPeer={logic.callEndedByPeer}
-      isLeaving={logic.isLeaving}
-      isAudioEnabled={logic.isAudioEnabled}
-      toggleAudio={logic.toggleAudio}
-      leaveRoom={logic.leaveRoom}
+      isGroupCall={isGroupCall}
+      participants={participants}
+      user={user}
+      hostId={hostId} // ✅ CORRECT — this is the facilitator's ID
+      isGroup={isGroupCall || otherParticipants.length > 1}
+      otherParticipants={otherParticipants}
+      callDuration={callDuration}
+      formatDuration={formatDuration}
+      isInCall={isInCall}
+      callEndedByPeer={callEndedByPeer}
+      isLeaving={isLeaving}
+      isAudioEnabled={isAudioEnabled}
+      toggleAudio={toggleAudio}
+      leaveRoom={leaveRoom}
       error={error}
     />
   );

@@ -344,55 +344,48 @@ export default function ConnectPage() {
     }
   };
 
- const postGroup = async () => {
-  if (!user || activeOneOnOne || activeGroup || isPostingGroup || isRedirectingRef.current) return;
-  setIsPostingGroup(true);
-  setError(null);
-  try {
-    // Generate room ID upfront
-    const roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const postGroup = async () => {
+    if (!user || activeOneOnOne || activeGroup || isPostingGroup || isRedirectingRef.current) return;
+    setIsPostingGroup(true);
+    setError(null);
+    try {
+      const roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-    // Insert group request WITH room_id
-    const { error: insertErr } = await supabase
-      .from('quick_group_requests')
-      .insert({
-        user_id: user.id,
-        status: 'available',
-        expires_at: expiresAt,
-        room_id: roomId, // ← include room_id from the start
-      });
+      // Insert group request WITH room_id
+      const { error: insertErr } = await supabase
+        .from('quick_group_requests')
+        .insert({
+          user_id: user.id,
+          status: 'available',
+          expires_at: expiresAt,
+          room_id: roomId,
+        });
 
-    if (insertErr) throw insertErr;
+      if (insertErr) throw insertErr;
 
-    // ✅ Add host to room_participants
-    const { error: participantErr } = await supabase
-      .from('room_participants')
-      .insert({
-        room_id: roomId,
-        user_id: user.id,
-        role: 'host',
-      });
+      // Add host to room_participants
+      const { error: participantErr } = await supabase
+        .from('room_participants')
+        .insert({
+          room_id: roomId,
+          user_id: user.id,
+          role: 'host',
+        });
 
-    if (participantErr) throw participantErr;
+      if (participantErr) throw participantErr;
 
-    // Update local state
-    setActiveGroup({
-      id: Date.now().toString(), // consider fetching real ID if needed
-      user_id: user.id,
-      status: 'available',
-      created_at: new Date().toISOString(),
-      expires_at: expiresAt,
-      room_id: roomId,
-      user: { full_name: user.full_name, avatar_url: user.avatar_url },
-    });
-  } catch (err) {
-    console.error('Failed to post group request:', err);
-    setError('Failed to create group call request.');
-  } finally {
-    setIsPostingGroup(false);
-  }
-};
+      // ✅ REDIRECT HOST IMMEDIATELY — like one-on-one
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+    } catch (err) {
+      console.error('Failed to post group request:', err);
+      setError('Failed to create group call request.');
+    } finally {
+      setIsPostingGroup(false);
+    }
+  };
+
   const cancelGroup = async () => {
     if (!activeGroup || isRedirectingRef.current) return;
     try {
@@ -416,98 +409,91 @@ export default function ConnectPage() {
   };
 
   const acceptOneOnOne = async (requestId: string) => {
-  if (!user || isRedirectingRef.current) return;
-  try {
-    const roomId = `quick-connect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const { data: existing } = await supabase
-      .from('quick_connect_requests')
-      .select('*')
-      .eq('id', requestId)
-      .eq('status', 'available')
-      .gt('expires_at', new Date().toISOString())
-      .single();
-    if (!existing) {
-      setError('One-on-one request not found or expired.');
-      return;
-    }
+    if (!user || isRedirectingRef.current) return;
+    try {
+      const roomId = `quick-connect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const { data: existing } = await supabase
+        .from('quick_connect_requests')
+        .select('*')
+        .eq('id', requestId)
+        .eq('status', 'available')
+        .gt('expires_at', new Date().toISOString())
+        .single();
+      if (!existing) {
+        setError('One-on-one request not found or expired.');
+        return;
+      }
 
-    // Update request
-    const { error: updateErr } = await supabase
-      .from('quick_connect_requests')
-      .update({
-        status: 'matched',
-        room_id: roomId,
-        acceptor_id: user.id,
-      })
-      .eq('id', requestId)
-      .eq('status', 'available');
-
-    if (updateErr) throw updateErr;
-
-    // ✅ INSERT BOTH INTO room_participants
-    await supabase.from('room_participants').upsert([
-      { room_id: roomId, user_id: existing.user_id, role: 'participant' },
-      { room_id: roomId, user_id: user.id, role: 'participant' }
-    ], { onConflict: 'room_id,user_id' });
-
-    isRedirectingRef.current = true;
-    router.push(`/room/${roomId}`);
-  } catch (err) {
-    console.error('Failed to accept 1:1:', err);
-    setError('Failed to accept one-on-one request.');
-  }
-};
-
- const acceptGroup = async (requestId: string) => {
-  if (!user || isRedirectingRef.current) return;
-  try {
-    // First, get the existing group request
-    const { data: existing } = await supabase
-      .from('quick_group_requests')
-      .select('user_id, room_id, status')
-      .eq('id', requestId)
-      .eq('status', 'available')
-      .gt('expires_at', new Date().toISOString())
-      .single();
-
-    if (!existing) {
-      setError('Group request not found or expired.');
-      return;
-    }
-
-    let roomId = existing.room_id;
-
-    // If room_id doesn't exist yet, create one
-    if (!roomId) {
-      roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       const { error: updateErr } = await supabase
-        .from('quick_group_requests')
-        .update({ status: 'matched', room_id: roomId })
+        .from('quick_connect_requests')
+        .update({
+          status: 'matched',
+          room_id: roomId,
+          acceptor_id: user.id,
+        })
         .eq('id', requestId)
         .eq('status', 'available');
+
       if (updateErr) throw updateErr;
+
+      await supabase.from('room_participants').upsert([
+        { room_id: roomId, user_id: existing.user_id, role: 'participant' },
+        { room_id: roomId, user_id: user.id, role: 'participant' }
+      ], { onConflict: 'room_id,user_id' });
+
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+    } catch (err) {
+      console.error('Failed to accept 1:1:', err);
+      setError('Failed to accept one-on-one request.');
     }
+  };
 
-    // ✅ ADD the joining user to room_participants
-    // (Host was already added when they created the room — if not, add them too)
-    await supabase.from('room_participants').upsert(
-      { room_id: roomId, user_id: user.id, role: 'participant' },
-      { onConflict: 'room_id,user_id' }
-    );
+  const acceptGroup = async (requestId: string) => {
+    if (!user || isRedirectingRef.current) return;
+    try {
+      const { data: existing } = await supabase
+        .from('quick_group_requests')
+        .select('user_id, room_id, status')
+        .eq('id', requestId)
+        .eq('status', 'available')
+        .gt('expires_at', new Date().toISOString())
+        .single();
 
-    // 🔁 Also ensure the HOST is in participants (in case they weren't added yet)
-    await supabase.from('room_participants').upsert(
-      { room_id: roomId, user_id: existing.user_id, role: 'host' },
-      { onConflict: 'room_id,user_id' }
-    );
+      if (!existing) {
+        setError('Group request not found or expired.');
+        return;
+      }
 
-    isRedirectingRef.current = true;
-    router.push(`/room/${roomId}`);
-  } catch (err) {
-    console.error('Failed to accept group:', err);
-    setError('Failed to join group call.');
-  }
-};
+      let roomId = existing.room_id;
+      if (!roomId) {
+        roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const { error: updateErr } = await supabase
+          .from('quick_group_requests')
+          .update({ status: 'matched', room_id: roomId })
+          .eq('id', requestId)
+          .eq('status', 'available');
+        if (updateErr) throw updateErr;
+      }
+
+      await supabase.from('room_participants').upsert(
+        { room_id: roomId, user_id: user.id, role: 'participant' },
+        { onConflict: 'room_id,user_id' }
+      );
+
+      await supabase.from('room_participants').upsert(
+        { room_id: roomId, user_id: existing.user_id, role: 'host' },
+        { onConflict: 'room_id,user_id' }
+      );
+
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+    } catch (err) {
+      console.error('Failed to accept group:', err);
+      setError('Failed to join group call.');
+    }
+  };
+
   const timeAgo = (timestamp: string) => {
     const now = new Date();
     const posted = new Date(timestamp);

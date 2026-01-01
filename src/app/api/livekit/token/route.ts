@@ -12,17 +12,17 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 
 export async function POST(req: NextRequest) {
   try {
-    const { room, identity: userId } = await req.json();
+    const { room, identity: userId, name } = await req.json(); // ✅ destructure `name`
 
-    if (!room || !userId) {
-      return NextResponse.json({ error: 'Missing room or identity' }, { status: 400 });
+    if (!room || !userId || typeof name !== 'string') {
+      return NextResponse.json({ error: 'Missing room, identity, or valid name' }, { status: 400 });
     }
 
     // Validate user exists
     const supabase = createClient();
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, full_name')
       .eq('id', userId)
       .single();
 
@@ -30,8 +30,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 401 });
     }
 
+    // Optional: fallback to name from DB if client didn't send one
+    const displayName = name || profile.full_name || 'Anonymous';
+
     const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
       identity: userId,
+      name: displayName, // ✅ SET NAME IN TOKEN — THIS IS CRITICAL
       ttl: '10m',
     });
 
