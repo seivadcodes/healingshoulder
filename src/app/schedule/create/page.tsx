@@ -1,7 +1,7 @@
 // src/app/schedule/create/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 
@@ -21,24 +21,27 @@ const GRIEF_TYPES = [
 export default function CreateEventPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [hostName, setHostName] = useState(''); // Custom display name
+  const [hostName, setHostName] = useState('');
   const [startTime, setStartTime] = useState('');
   const [duration, setDuration] = useState(60);
   const [selectedGriefTypes, setSelectedGriefTypes] = useState<string[]>([]);
   const [isRecurring, setIsRecurring] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
   const router = useRouter();
 
-  // On load: get user, profile, and set defaults
+  // Initialize user & defaults
   useEffect(() => {
-    const initUserAndTime = async () => {
+    const init = async () => {
       const { data: { session }, error: authError } = await supabase.auth.getSession();
-      
+
       if (authError || !session?.user) {
         router.push('/auth');
         return;
@@ -46,7 +49,6 @@ export default function CreateEventPage() {
 
       setUserId(session.user.id);
 
-      // Fetch profile to get full_name
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('full_name')
@@ -58,24 +60,53 @@ export default function CreateEventPage() {
         return;
       }
 
-      // Set host name default to user's full_name
       setHostName(profile.full_name || 'Host');
-
-      // Set default start time
       const now = new Date();
       now.setMinutes(now.getMinutes() + 30);
       setStartTime(now.toISOString().slice(0, 16));
     };
 
-    initUserAndTime();
+    init();
   }, [supabase, router]);
 
   const toggleGriefType = (type: string) => {
     setSelectedGriefTypes((prev) =>
-      prev.includes(type)
-        ? prev.filter((t) => t !== type)
-        : [...prev, type]
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image must be less than 5MB.');
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        setError('Please upload an image (jpg, png, etc.).');
+        return;
+      }
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(file));
+    }
+  };
+
+  const uploadImage = async (file: File, eventId: string): Promise<string | null> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${eventId}.${fileExt}`;
+    const filePath = `event-images/${fileName}`;
+
+    const { error } = await supabase.storage
+      .from('event-images')
+      .upload(filePath, file, { upsert: true });
+
+    if (error) {
+      console.error('Image upload error:', error);
+      throw new Error('Failed to upload event image.');
+    }
+
+    const { data } = supabase.storage.from('event-images').getPublicUrl(filePath);
+    return data.publicUrl;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,7 +121,6 @@ export default function CreateEventPage() {
       setError('Please fill in all required fields.');
       return;
     }
-
     if (!userId) {
       setError('User not authenticated.');
       return;
@@ -102,20 +132,40 @@ export default function CreateEventPage() {
       const localDateTime = new Date(startTime);
       const utcISO = localDateTime.toISOString();
 
-      const { error: insertError } = await supabase.from('events').insert({
-        title: cleanTitle,
-        description: description.trim() || null,
-        host_id: userId,           // 🔒 Real user ID (for security)
-        host_name: cleanHostName,  // 👤 Display name (customizable)
-        start_time: utcISO,
-        duration: duration,
-        grief_types: selectedGriefTypes,
-        is_recurring: isRecurring,
-      });
+      // Create event first
+      const { data, error: insertError } = await supabase
+        .from('events')
+        .insert({
+          title: cleanTitle,
+          description: description.trim() || null,
+          host_id: userId,
+          host_name: cleanHostName,
+          start_time: utcISO,
+          duration: duration,
+          grief_types: selectedGriefTypes,
+          is_recurring: isRecurring,
+        })
+        .select('id')
+        .single();
 
-      if (insertError) {
-        console.error('Supabase insert error:', insertError);
-        throw new Error(insertError.message || 'Failed to save event.');
+      if (insertError) throw insertError;
+      if (!data) throw new Error('Event creation failed.');
+
+      let imageUrl = null;
+      if (imageFile) {
+        imageUrl = await uploadImage(imageFile, data.id);
+      }
+
+      // Update with image URL if available
+      if (imageUrl) {
+        const { error: updateError } = await supabase
+          .from('events')
+          .update({ image_url: imageUrl })
+          .eq('id', data.id);
+
+        if (updateError) {
+          console.warn('Failed to update image URL:', updateError);
+        }
       }
 
       setSuccess(true);
@@ -126,6 +176,10 @@ export default function CreateEventPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
   };
 
   return (
@@ -148,6 +202,38 @@ export default function CreateEventPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Image Upload */}
+          <div>
+            <label className="block text-gray-700 font-medium mb-2">
+              Event Image (optional)
+            </label>
+            <div
+              onClick={triggerFileInput}
+              className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:bg-gray-50 transition"
+            >
+              {imagePreview ? (
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="mx-auto max-h-40 rounded-lg object-cover"
+                />
+              ) : (
+                <div className="text-gray-500">
+                  <p>Click to upload an image (max 5MB)</p>
+                  <p className="text-xs mt-1">JPG, PNG, or GIF</p>
+                </div>
+              )}
+            </div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageChange}
+              accept="image/*"
+              className="hidden"
+            />
+          </div>
+
+          {/* Title */}
           <div>
             <label className="block text-gray-700 font-medium mb-1">Event Title *</label>
             <input
@@ -160,6 +246,7 @@ export default function CreateEventPage() {
             />
           </div>
 
+          {/* Host Name */}
           <div>
             <label className="block text-gray-700 font-medium mb-1">Host Name *</label>
             <input
@@ -167,14 +254,12 @@ export default function CreateEventPage() {
               value={hostName}
               onChange={(e) => setHostName(e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder="e.g., Maria, Grief Support Team, or Anonymous"
+              placeholder="e.g., Maria or Grief Support Team"
               required
             />
-            <p className="text-xs text-gray-500 mt-1">
-              This is the name attendees will see. Defaults to your profile name.
-            </p>
           </div>
 
+          {/* Description */}
           <div>
             <label className="block text-gray-700 font-medium mb-1">Description</label>
             <textarea
@@ -182,10 +267,11 @@ export default function CreateEventPage() {
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder="What will happen? Who is it for? (optional)"
+              placeholder="What will happen? Who is it for?"
             />
           </div>
 
+          {/* Start Time */}
           <div>
             <label className="block text-gray-700 font-medium mb-1">
               Start Time (your local time) *
@@ -202,6 +288,7 @@ export default function CreateEventPage() {
             </p>
           </div>
 
+          {/* Duration */}
           <div>
             <label className="block text-gray-700 font-medium mb-1">Duration (minutes) *</label>
             <input
@@ -214,6 +301,7 @@ export default function CreateEventPage() {
             />
           </div>
 
+          {/* Grief Types */}
           <div>
             <label className="block text-gray-700 font-medium mb-2">Grief Type(s) *</label>
             <div className="flex flex-wrap gap-2">
@@ -240,6 +328,7 @@ export default function CreateEventPage() {
             )}
           </div>
 
+          {/* Recurring */}
           <div className="flex items-center">
             <input
               type="checkbox"
@@ -253,6 +342,7 @@ export default function CreateEventPage() {
             </label>
           </div>
 
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}

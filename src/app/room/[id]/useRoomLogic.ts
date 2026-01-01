@@ -11,6 +11,7 @@ import {
   ConnectionState,
   RemoteParticipant,
   LocalTrack,
+  RoomOptions,
 } from 'livekit-client';
 
 type Profile = {
@@ -133,7 +134,7 @@ export const useRoomLogic = (roomId: string) => {
     
     const roomUpdateChannel = supabase
       .channel(`room_updates:${roomId}`)
-      .on(
+      .on<RoomRecord>(
         'postgres_changes',
         {
           event: 'UPDATE',
@@ -141,7 +142,7 @@ export const useRoomLogic = (roomId: string) => {
           table: table,
           filter: `room_id=eq.${roomId}`,
         },
-        (payload: { eventType: 'UPDATE'; new: RoomRecord }) => {
+        (payload) => {
           setRoomRecord(payload.new);
           
           // Start timer if call_started_at was just set
@@ -165,7 +166,7 @@ export const useRoomLogic = (roomId: string) => {
 
     const channel = supabase
       .channel(`room_participants:${roomId}`)
-      .on(
+      .on<RoomParticipantRecord>(
         'postgres_changes',
         {
           event: '*',
@@ -173,7 +174,7 @@ export const useRoomLogic = (roomId: string) => {
           table: 'room_participants',
           filter: `room_id=eq.${roomId}`,
         },
-        async (payload: PostgresChangeEvent<RoomParticipantRecord>) => {
+        async (payload) => {
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             await fetchParticipants();
           } else if (payload.eventType === 'DELETE') {
@@ -344,10 +345,11 @@ export const useRoomLogic = (roomId: string) => {
       return;
     }
 
-    const newRoom = new Room({
+    const roomOptions: RoomOptions = {
       adaptiveStream: true,
       dynacast: true,
-    });
+    };
+    const newRoom = new Room(roomOptions);
     setCurrentRoom(newRoom);
 
     // 🔊 Audio track handling
