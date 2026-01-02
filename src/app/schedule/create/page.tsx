@@ -18,6 +18,16 @@ const GRIEF_TYPES = [
   'other',
 ];
 
+// Helper to format Date to local YYYY-MM-DDTHH:mm (for datetime-local input)
+const formatDateToLocalInput = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 export default function CreateEventPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -61,9 +71,11 @@ export default function CreateEventPage() {
       }
 
       setHostName(profile.full_name || 'Host');
+
+      // ✅ FIXED: Set default start time to LOCAL time +30 min
       const now = new Date();
       now.setMinutes(now.getMinutes() + 30);
-      setStartTime(now.toISOString().slice(0, 16));
+      setStartTime(formatDateToLocalInput(now));
     };
 
     init();
@@ -129,10 +141,11 @@ export default function CreateEventPage() {
     setLoading(true);
 
     try {
+      // ✅ Now: startTime is a LOCAL time string (e.g., "2026-01-02T19:12")
+      // new Date(startTime) interprets it as LOCAL → then .toISOString() converts to UTC
       const localDateTime = new Date(startTime);
       const utcISO = localDateTime.toISOString();
 
-      // Create event first
       const { data, error: insertError } = await supabase
         .from('events')
         .insert({
@@ -156,7 +169,6 @@ export default function CreateEventPage() {
         imageUrl = await uploadImage(imageFile, data.id);
       }
 
-      // Update with image URL if available
       if (imageUrl) {
         const { error: updateError } = await supabase
           .from('events')
@@ -182,45 +194,110 @@ export default function CreateEventPage() {
     fileInputRef.current?.click();
   };
 
+  // Helper: format grief type label
+  const formatGriefType = (type: string) => {
+    return type.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-4 pb-24">
-      <div className="max-w-lg mx-auto">
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(to bottom, #ffffff, #f9fafb, #f5f5f5)',
+        padding: '1rem',
+        paddingBottom: '6rem',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+      }}
+    >
+      <div style={{ width: '100%', maxWidth: '32rem' }}>
         <button
           onClick={() => router.back()}
-          className="text-gray-600 text-sm mb-4 flex items-center"
+          style={{
+            color: '#4b5563',
+            fontSize: '0.875rem',
+            marginBottom: '1rem',
+            display: 'flex',
+            alignItems: 'center',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+          }}
         >
           ← Back to schedule
         </button>
 
-        <h1 className="text-2xl font-bold text-gray-800 mb-6">Create a New Event</h1>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#111827', marginBottom: '1.5rem' }}>
+          Create a New Event
+        </h1>
 
-        {error && <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4">{error}</div>}
+        {error && (
+          <div
+            style={{
+              backgroundColor: '#fef2f2',
+              color: '#b91c1c',
+              padding: '0.75rem',
+              borderRadius: '0.5rem',
+              marginBottom: '1rem',
+            }}
+          >
+            {error}
+          </div>
+        )}
         {success && (
-          <div className="bg-green-50 text-green-700 p-3 rounded-lg mb-4">
+          <div
+            style={{
+              backgroundColor: '#ecfdf5',
+              color: '#047857',
+              padding: '0.75rem',
+              borderRadius: '0.5rem',
+              marginBottom: '1rem',
+            }}
+          >
             Event created! Redirecting...
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {/* Image Upload */}
           <div>
-            <label className="block text-gray-700 font-medium mb-2">
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
               Event Image (optional)
             </label>
             <div
               onClick={triggerFileInput}
-              className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:bg-gray-50 transition"
+              style={{
+                border: '2px dashed #d1d5db',
+                borderRadius: '0.75rem',
+                padding: '1rem',
+                textAlign: 'center' as const,
+                cursor: 'pointer',
+                backgroundColor: '#ffffff',
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
             >
               {imagePreview ? (
                 <img
                   src={imagePreview}
                   alt="Preview"
-                  className="mx-auto max-h-40 rounded-lg object-cover"
+                  style={{
+                    maxHeight: '10rem',
+                    borderRadius: '0.5rem',
+                    objectFit: 'cover',
+                    width: 'auto',
+                    height: 'auto',
+                    maxWidth: '100%',
+                  }}
                 />
               ) : (
-                <div className="text-gray-500">
+                <div style={{ color: '#6b7280', fontSize: '0.875rem' }}>
                   <p>Click to upload an image (max 5MB)</p>
-                  <p className="text-xs mt-1">JPG, PNG, or GIF</p>
+                  <p style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#9ca3af' }}>
+                    JPG, PNG, or GIF
+                  </p>
                 </div>
               )}
             </div>
@@ -229,18 +306,27 @@ export default function CreateEventPage() {
               ref={fileInputRef}
               onChange={handleImageChange}
               accept="image/*"
-              className="hidden"
+              style={{ display: 'none' }}
             />
           </div>
 
           {/* Title */}
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Event Title *</label>
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+              Event Title *
+            </label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '0.5rem',
+                fontSize: '1rem',
+                boxSizing: 'border-box',
+              }}
               placeholder="e.g., Evening Grief Circle"
               required
             />
@@ -248,12 +334,21 @@ export default function CreateEventPage() {
 
           {/* Host Name */}
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Host Name *</label>
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+              Host Name *
+            </label>
             <input
               type="text"
               value={hostName}
               onChange={(e) => setHostName(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '0.5rem',
+                fontSize: '1rem',
+                boxSizing: 'border-box',
+              }}
               placeholder="e.g., Maria or Grief Support Team"
               required
             />
@@ -261,94 +356,143 @@ export default function CreateEventPage() {
 
           {/* Description */}
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Description</label>
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+              Description
+            </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '0.5rem',
+                fontSize: '1rem',
+                boxSizing: 'border-box',
+                resize: 'vertical',
+              }}
               placeholder="What will happen? Who is it for?"
             />
           </div>
 
           {/* Start Time */}
           <div>
-            <label className="block text-gray-700 font-medium mb-1">
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
               Start Time (your local time) *
             </label>
             <input
               type="datetime-local"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '0.5rem',
+                fontSize: '1rem',
+                boxSizing: 'border-box',
+              }}
               required
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
               Saved in UTC — shown in each user’s local time.
             </p>
           </div>
 
           {/* Duration */}
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Duration (minutes) *</label>
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+              Duration (minutes) *
+            </label>
             <input
               type="number"
               min="10"
               max="240"
               value={duration}
               onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '0.5rem',
+                fontSize: '1rem',
+                boxSizing: 'border-box',
+              }}
             />
           </div>
 
           {/* Grief Types */}
           <div>
-            <label className="block text-gray-700 font-medium mb-2">Grief Type(s) *</label>
-            <div className="flex flex-wrap gap-2">
-              {GRIEF_TYPES.map((type) => {
-                const label = type.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => toggleGriefType(type)}
-                    className={`px-3 py-2 text-sm rounded-full border transition ${
-                      selectedGriefTypes.includes(type)
-                        ? 'bg-blue-100 border-blue-500 text-blue-700'
-                        : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+            <label style={{ display: 'block', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+              Grief Type(s) *
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              {GRIEF_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => toggleGriefType(type)}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    border: selectedGriefTypes.includes(type)
+                      ? '1px solid #3b82f6'
+                      : '1px solid #d1d5db',
+                    borderRadius: '9999px',
+                    backgroundColor: selectedGriefTypes.includes(type)
+                      ? '#eff6ff'
+                      : '#f3f4f6',
+                    color: selectedGriefTypes.includes(type) ? '#1d4ed8' : '#374151',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {formatGriefType(type)}
+                </button>
+              ))}
             </div>
             {selectedGriefTypes.length === 0 && (
-              <p className="text-red-600 text-sm mt-1">Please select at least one grief type.</p>
+              <p style={{ color: '#ef4444', fontSize: '0.75rem' }}>
+                Please select at least one grief type.
+              </p>
             )}
           </div>
 
           {/* Recurring */}
-          <div className="flex items-center">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <input
               type="checkbox"
               id="recurring"
               checked={isRecurring}
               onChange={(e) => setIsRecurring(e.target.checked)}
-              className="h-4 w-4 text-blue-600 rounded"
+              style={{
+                width: '1rem',
+                height: '1rem',
+                accentColor: '#3b82f6',
+              }}
             />
-            <label htmlFor="recurring" className="ml-2 text-gray-700">
+            <label htmlFor="recurring" style={{ color: '#374151', fontSize: '0.875rem' }}>
               This is a recurring event
             </label>
           </div>
 
-          {/* Submit */}
+          {/* Submit Button */}
           <button
             type="submit"
             disabled={loading}
-            className={`w-full py-3 px-4 rounded-lg font-semibold text-white transition ${
-              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-            }`}
+            style={{
+              width: '100%',
+              padding: '0.875rem',
+              backgroundColor: loading ? '#9ca3af' : '#3b82f6',
+              color: 'white',
+              fontWeight: '600',
+              borderRadius: '0.5rem',
+              border: 'none',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: '1rem',
+              marginTop: '0.5rem',
+            }}
           >
             {loading ? 'Creating...' : 'Create Event'}
           </button>

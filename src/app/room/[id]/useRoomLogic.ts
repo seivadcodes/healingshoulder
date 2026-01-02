@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  Room,
+  createLocalTracks,
   RoomEvent,
   Track,
   ConnectionState,
   RemoteParticipant,
   LocalTrack,
   RoomOptions,
+  Room,
 } from 'livekit-client';
 
 type Profile = {
