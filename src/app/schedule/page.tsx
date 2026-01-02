@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 type Event = {
@@ -25,6 +26,7 @@ export default function EventsPage() {
   const [attendeeCounts, setAttendeeCounts] = useState<Record<string, number>>({});
   const [user, setUser] = useState<{ id: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   const supabase = createClient();
 
@@ -35,7 +37,6 @@ export default function EventsPage() {
       setUser(user);
 
       if (!user) {
-        // Optional: redirect to login, or show "sign in to reserve"
         console.warn('User not signed in');
       }
 
@@ -114,11 +115,13 @@ export default function EventsPage() {
   };
 
   const handleUnreserve = async (eventId: string) => {
+    if (!user) return;
+
     const { error } = await supabase
       .from('reservations')
       .delete()
       .eq('event_id', eventId)
-      .eq('user_id', user!.id);
+      .eq('user_id', user.id);
 
     if (error) {
       console.error('Unreserve failed:', error);
@@ -131,6 +134,10 @@ export default function EventsPage() {
         [eventId]: Math.max(0, (prev[eventId] || 1) - 1),
       }));
     }
+  };
+
+  const handleJoin = (eventId: string) => {
+    router.push(`/events/${eventId}/live`);
   };
 
   if (loading) {
@@ -177,7 +184,8 @@ export default function EventsPage() {
                   👥 {currentAttendees} / {event.max_attendees ?? '∞'} attending
                 </p>
 
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {/* Reserve / Cancel button */}
                   {reserved ? (
                     <button
                       onClick={() => handleUnreserve(event.id)}
@@ -200,6 +208,14 @@ export default function EventsPage() {
                       {isFull ? 'Event Full' : user ? 'Reserve Spot' : 'Sign In to Reserve'}
                     </button>
                   )}
+
+                  {/* Join button — always shown for testing */}
+                  <button
+                    onClick={() => handleJoin(event.id)}
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    Join Event
+                  </button>
                 </div>
               </div>
             );
