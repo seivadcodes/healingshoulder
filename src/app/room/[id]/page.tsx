@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
   LiveKitRoom,
   ControlBar,
   useParticipants,
+  useLocalParticipant,
   RoomAudioRenderer,
 } from '@livekit/components-react';
 import { Participant } from 'livekit-client';
 import '@livekit/components-styles';
-import { PhoneOff, Timer } from 'lucide-react';
+import { PhoneOff, Timer, User, Mic, MicOff } from 'lucide-react';
 
 type RoomType = 'one-on-one' | 'group';
 type RoomMetadata = {
@@ -32,13 +33,36 @@ export default function RoomPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
-  const supabase = createClient();
+  const [callEndedByPeer, setCallEndedByPeer] = useState(false);
 
-  // Debug: log key states
+  const supabase = createClient();
+  const broadcastChannelRef = useRef<any>(null);
+
+  // 🔴 Set up Supabase broadcast listener for call_ended
   useEffect(() => {
-    console.log('[RoomPage] roomId:', roomId);
-    console.log('[RoomPage] roomMeta:', roomMeta);
-  }, [roomId, roomMeta]);
+    if (!roomId || !roomMeta) return;
+
+    const channel = supabase
+      .channel(`room:${roomId}`)
+      .on('broadcast', { event: 'call_ended' }, (payload) => {
+        console.log('[RoomPage] Received call_ended:', payload);
+        setCallEndedByPeer(true);
+      })
+      .subscribe();
+
+    broadcastChannelRef.current = channel;
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [roomId, roomMeta, supabase]);
+
+  // 🚪 Auto-redirect if peer ended the call
+  useEffect(() => {
+    if (callEndedByPeer) {
+      router.push('/connect');
+    }
+  }, [callEndedByPeer, router]);
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -209,70 +233,46 @@ export default function RoomPage() {
     }
   };
 
-  // ✅ LEAVE CALL: remove from room_participants AND redirect
- const handleLeave = async () => {
-  if (!roomMeta || !roomId) return;
+  // ✅ LEAVE CALL: remove from room_participants, broadcast if 1:1, AND redirect
+  const handleLeave = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.push('/auth');
+      return;
+    }
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    router.push('/auth');
-    return;
-  }
+    const userId = session.user.id;
 
-  const userId = session.user.id;
-
-  // 1. Remove self from room_participants
-  await supabase
-    .from('room_participants')
-    .delete()
-    .eq('room_id', roomId)
-    .eq('user_id', userId);
-
-  // 2. For 1:1 calls: end the entire call for both participants
-  if (roomMeta.type === 'one-on-one') {
-    console.log('[RoomPage] Ending 1:1 call for both participants');
-
-    // Remove the OTHER participant
+    // 1. Remove self from participants
     await supabase
       .from('room_participants')
       .delete()
       .eq('room_id', roomId)
-      .neq('user_id', userId);
+      .eq('user_id', userId);
 
-    // Mark the request as completed
-    await supabase
-      .from('quick_connect_requests')
-      .update({ 
-        status: 'completed', 
-        expires_at: new Date().toISOString() 
-      })
-      .eq('room_id', roomId);
+    // 2. Broadcast call_ended AND mark as completed if it's a one-on-one call
+    if (roomMeta?.type === 'one-on-one' && broadcastChannelRef.current) {
+      try {
+        // Broadcast to peer
+        broadcastChannelRef.current.send({
+          type: 'broadcast',
+          event: 'call_ended',
+          payload: { by: userId },
+        });
 
-  // 3. (Optional) For group calls: if host leaves, end the room for everyone
-  // Uncomment the block below if you want group calls to end when host leaves
-  
-  } else if (roomMeta.type === 'group' && roomMeta.hostId === userId) {
-    console.log('[RoomPage] Host leaving group — ending call for all');
+        // Mark room as completed in DB
+        await supabase
+          .from('quick_connect_requests')
+          .update({ status: 'completed' })
+          .eq('room_id', roomId);
+      } catch (err) {
+        console.warn('Failed to broadcast call_ended or update room status:', err);
+      }
+    }
 
-    // Remove all participants
-    await supabase
-      .from('room_participants')
-      .delete()
-      .eq('room_id', roomId);
-
-    // Mark group request as completed
-    await supabase
-      .from('quick_group_requests')
-      .update({ 
-        status: 'completed', 
-        expires_at: new Date().toISOString() 
-      })
-      .eq('room_id', roomId);
-  
-  }
-
-  router.push('/connect');
-};
+    // 3. Redirect
+    router.push('/connect');
+  };
 
   const formatTime = (seconds: number): string => {
     const h = Math.floor(seconds / 3600);
@@ -285,21 +285,40 @@ export default function RoomPage() {
 
   if (isLoading) {
     return (
-      <div className="pt-16 p-6 text-center">
-        <div className="animate-pulse text-xl">Joining room...</div>
+      <div style={{ paddingTop: '4rem', padding: '1.5rem', textAlign: 'center' }}>
+        <div style={{ 
+          animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          fontSize: '1.25rem'
+        }}>Joining room...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="pt-16 p-6 max-w-2xl mx-auto text-center">
-        <PhoneOff className="w-16 h-16 text-red-500 mx-auto mb-4" />
-        <h1 className="text-2xl font-bold text-red-600 mb-2">Unable to Join</h1>
-        <p className="text-gray-700 mb-6">{error}</p>
+      <div style={{ 
+        paddingTop: '4rem', 
+        padding: '1.5rem', 
+        maxWidth: '32rem', 
+        margin: '0 auto', 
+        textAlign: 'center'
+      }}>
+        <PhoneOff style={{ width: '4rem', height: '4rem', color: '#ef4444', margin: '0 auto 1rem' }} />
+        <h1 style={{ fontSize: '1.875rem', fontWeight: '700', color: '#dc2626', marginBottom: '0.5rem' }}>Unable to Join</h1>
+        <p style={{ color: '#374151', marginBottom: '1.5rem' }}>{error}</p>
         <button
           onClick={() => router.push('/connect')}
-          className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          style={{
+            padding: '0.625rem 1.25rem',
+            backgroundColor: '#2563eb',
+            color: 'white',
+            borderRadius: '0.5rem',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'background-color 0.3s'
+          }}
+          onMouseOver={e => e.currentTarget.style.backgroundColor = '#1d4ed8'}
+          onMouseOut={e => e.currentTarget.style.backgroundColor = '#2563eb'}
         >
           Back to Connections
         </button>
@@ -309,60 +328,235 @@ export default function RoomPage() {
 
   if (!roomMeta || !token) {
     return (
-      <div className="pt-16 p-6 text-center">
+      <div style={{ paddingTop: '4rem', padding: '1.5rem', textAlign: 'center' }}>
         Invalid room
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-900">
-      <div className="pt-16 px-6">
-        <div className="max-w-7xl mx-auto">
-          <h1 className="text-2xl font-bold text-white">{roomMeta.title}</h1>
-          <p className="text-gray-400 mt-1">
-            {roomMeta.type === 'group' ? 'Group support call' : 'One-on-one conversation'}
-          </p>
-          {/* 🔴 TIMER DISPLAY — now shows even if just started */}
-          {roomMeta.callStartedAt || elapsedTime > 0 ? (
-            <div className="flex items-center gap-2 mt-2 text-sm text-green-400 font-mono">
-              <Timer className="w-4 h-4" />
-              <span>Call duration: {formatTime(elapsedTime)}</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 mt-2 text-sm text-yellow-400">
-              <Timer className="w-4 h-4" />
-              <span>Waiting for participants...</span>
-            </div>
-          )}
+  // PHONE CALL INTERFACE FOR ONE-ON-ONE
+  if (roomMeta.type === 'one-on-one') {
+    return (
+      <div style={{ 
+        minHeight: '100vh', 
+        backgroundColor: '#0f172a',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        <div style={{ 
+          paddingTop: '2.5rem', 
+          paddingBottom: '1rem',
+          padding: '1.5rem',
+          textAlign: 'center',
+          borderBottom: '1px solid #334155'
+        }}>
+          <h1 style={{ 
+            fontSize: '1.875rem', 
+            fontWeight: '700', 
+            color: 'white',
+            marginBottom: '0.25rem'
+          }}>{roomMeta.title}</h1>
+          <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>One-on-one conversation</p>
+          
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            gap: '0.5rem', 
+            marginTop: '0.5rem'
+          }}>
+            <Timer style={{ width: '1.25rem', height: '1.25rem', color: '#10b981' }} />
+            <span style={{ 
+              color: '#10b981', 
+              fontFamily: 'monospace', 
+              fontSize: '1.125rem',
+              fontWeight: '600'
+            }}>
+              {formatTime(elapsedTime)}
+            </span>
+          </div>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-6 pb-8">
         <LiveKitRoom
           token={token}
           serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
           audio={true}
           video={false}
           onDisconnected={() => setError('Disconnected from room')}
-          className="flex flex-col h-[calc(100vh-180px)]"
+          style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
         >
-          <div className="flex-1 bg-gray-800 rounded-xl p-6 overflow-y-auto mb-4">
-            <h2 className="text-xl font-bold text-white mb-4">
-              {roomMeta.type === 'group' ? 'Participants' : 'In Call'}
+          <div style={{ 
+            flex: 1, 
+            display: 'flex', 
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '1.5rem',
+            gap: '3rem'
+          }}>
+            <PhoneCallParticipants hostId={roomMeta.hostId} />
+          </div>
+
+          <div style={{ 
+            padding: '1.5rem',
+            borderTop: '1px solid #334155',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '2rem'
+          }}>
+            {/* Mute Button - Bottom Left */}
+            <MuteButton />
+            
+            {/* End Call Button - Centered */}
+            <button
+              onClick={handleLeave}
+              style={{
+                width: '4.5rem',
+                height: '4.5rem',
+                borderRadius: '50%',
+                backgroundColor: '#ef4444',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'background-color 0.3s',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+              }}
+              onMouseOver={e => e.currentTarget.style.backgroundColor = '#dc2626'}
+              onMouseOut={e => e.currentTarget.style.backgroundColor = '#ef4444'}
+            >
+              <PhoneOff style={{ width: '2rem', height: '2rem', color: 'white' }} />
+            </button>
+          </div>
+          <RoomAudioRenderer />
+        </LiveKitRoom>
+      </div>
+    );
+  }
+
+  // GROUP CALL INTERFACE (with inline CSS)
+  return (
+    <div style={{ 
+      minHeight: '100vh', 
+      backgroundColor: '#0f172a'
+    }}>
+      <div style={{ 
+        paddingTop: '4rem', 
+        padding: '1.5rem'
+      }}>
+        <div style={{ 
+          maxWidth: '80rem', 
+          margin: '0 auto'
+        }}>
+          <h1 style={{ 
+            fontSize: '1.875rem', 
+            fontWeight: '700', 
+            color: 'white'
+          }}>{roomMeta.title}</h1>
+          <p style={{ 
+            color: '#94a3b8', 
+            marginTop: '0.25rem'
+          }}>
+            Group support call
+          </p>
+          {/* 🔴 TIMER DISPLAY */}
+          {roomMeta.callStartedAt || elapsedTime > 0 ? (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem', 
+              marginTop: '0.5rem',
+              color: '#10b981',
+              fontFamily: 'monospace',
+              fontSize: '0.875rem'
+            }}>
+              <Timer style={{ width: '1rem', height: '1rem' }} />
+              <span>Call duration: {formatTime(elapsedTime)}</span>
+            </div>
+          ) : (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem', 
+              marginTop: '0.5rem',
+              color: '#f59e0b',
+              fontSize: '0.875rem'
+            }}>
+              <Timer style={{ width: '1rem', height: '1rem' }} />
+              <span>Waiting for participants...</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ 
+        maxWidth: '80rem', 
+        margin: '0 auto', 
+        padding: '1.5rem', 
+        paddingBottom: '2rem'
+      }}>
+        <LiveKitRoom
+          token={token}
+          serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
+          audio={true}
+          video={false}
+          onDisconnected={() => setError('Disconnected from room')}
+          style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: 'calc(100vh - 16rem)'
+          }}
+        >
+          <div style={{ 
+            flex: 1, 
+            backgroundColor: '#1e293b', 
+            borderRadius: '0.75rem', 
+            padding: '1.5rem', 
+            overflowY: 'auto', 
+            marginBottom: '1rem'
+          }}>
+            <h2 style={{ 
+              fontSize: '1.25rem', 
+              fontWeight: '700', 
+              color: 'white', 
+              marginBottom: '1rem'
+            }}>
+              Participants
             </h2>
             <AudioParticipantsList hostId={roomMeta.hostId} />
           </div>
 
-          <div className="flex justify-between items-center">
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center'
+          }}>
             <ControlBar
               controls={{ microphone: true, camera: false, screenShare: false, chat: false }}
               variation="minimal"
-              className="!bg-gray-800 !border-t-0 !rounded-lg"
+              style={{ 
+                backgroundColor: '#1e293b', 
+                border: 'none', 
+                borderRadius: '0.75rem',
+                padding: '0.5rem 1rem'
+              }}
             />
             <button
               onClick={handleLeave}
-              className="px-5 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition ml-3"
+              style={{
+                marginLeft: '0.75rem',
+                padding: '0.625rem 1.25rem',
+                backgroundColor: '#ef4444',
+                color: 'white',
+                borderRadius: '0.5rem',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'background-color 0.3s'
+              }}
+              onMouseOver={e => e.currentTarget.style.backgroundColor = '#dc2626'}
+              onMouseOut={e => e.currentTarget.style.backgroundColor = '#ef4444'}
             >
               Leave Call
             </button>
@@ -374,7 +568,134 @@ export default function RoomPage() {
   );
 }
 
-// Participant components unchanged
+// Mute Button Component for one-on-one calls
+function MuteButton() {
+  const { localParticipant } = useLocalParticipant();
+  const [isMuted, setIsMuted] = useState(false);
+
+  const toggleMute = () => {
+    if (localParticipant) {
+      const newState = !localParticipant.isMicrophoneEnabled;
+      localParticipant.setMicrophoneEnabled(newState);
+      setIsMuted(!newState);
+    }
+  };
+
+  return (
+    <button
+      onClick={toggleMute}
+      style={{
+        width: '3.5rem',
+        height: '3.5rem',
+        borderRadius: '50%',
+        backgroundColor: isMuted ? '#ef4444' : '#4b5563',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        border: 'none',
+        cursor: 'pointer',
+        transition: 'background-color 0.3s',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+      }}
+      onMouseOver={e => e.currentTarget.style.backgroundColor = isMuted ? '#dc2626' : '#374151'}
+      onMouseOut={e => e.currentTarget.style.backgroundColor = isMuted ? '#ef4444' : '#4b5563'}
+    >
+      {isMuted ? (
+        <MicOff style={{ width: '1.5rem', height: '1.5rem', color: 'white' }} />
+      ) : (
+        <Mic style={{ width: '1.5rem', height: '1.5rem', color: 'white' }} />
+      )}
+    </button>
+  );
+}
+
+// Phone call specific participant component (now only shows the other participant)
+function PhoneCallParticipants({ hostId }: { hostId: string }) {
+  const participants = useParticipants();
+  const { localParticipant } = useLocalParticipant();
+
+  // Always exclude the local user
+  const remoteParticipants = participants.filter(p => p !== localParticipant);
+
+  if (remoteParticipants.length === 0) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        color: '#94a3b8',
+        fontSize: '1.125rem'
+      }}>
+        Waiting for the other participant to join...
+      </div>
+    );
+  }
+
+  // In 1:1, there should be only one remote participant
+  const otherParticipant = remoteParticipants[0];
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center',
+      gap: '2.5rem'
+    }}>
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center'
+      }}>
+        <div style={{ 
+          width: '12rem',
+          height: '12rem',
+          borderRadius: '50%',
+          backgroundColor: otherParticipant.isSpeaking ? '#10b981' : '#334155',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          transition: 'background-color 0.3s',
+          marginBottom: '1rem',
+          border: otherParticipant.isSpeaking ? '3px solid #059669' : 'none'
+        }}>
+          <User style={{ 
+            width: '5rem', 
+            height: '5rem', 
+            color: 'white' 
+          }} />
+        </div>
+        <div style={{ 
+          textAlign: 'center',
+          color: 'white',
+          fontSize: '1.25rem',
+          fontWeight: '600'
+        }}>
+          {otherParticipant.name || 'Participant'}
+          {otherParticipant.isSpeaking && (
+            <span style={{ 
+              display: 'block', 
+              color: '#10b981',
+              fontSize: '0.875rem',
+              marginTop: '0.25rem'
+            }}>
+              Speaking
+            </span>
+          )}
+          {!otherParticipant.isMicrophoneEnabled && (
+            <span style={{ 
+              display: 'block', 
+              color: '#f87171',
+              fontSize: '0.875rem',
+              marginTop: '0.25rem'
+            }}>
+              Microphone off
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Participant components for group calls
 function AudioParticipantsList({ hostId }: { hostId: string }) {
   const participants = useParticipants();
   const sorted = [...participants].sort((a, b) => {
@@ -385,7 +706,7 @@ function AudioParticipantsList({ hostId }: { hostId: string }) {
     return (a.name || a.identity).localeCompare(b.name || b.identity);
   });
   return (
-    <div className="space-y-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
       {sorted.map((p) => (
         <ParticipantItem key={p.sid} participant={p} isHost={p.identity === hostId} />
       ))}
@@ -395,11 +716,36 @@ function AudioParticipantsList({ hostId }: { hostId: string }) {
 
 function ParticipantItem({ participant, isHost }: { participant: Participant; isHost: boolean }) {
   return (
-    <div className="flex items-center gap-4 p-3 bg-gray-700 rounded-lg">
-      <div className={`w-3 h-3 rounded-full ${participant.isSpeaking ? 'bg-green-500' : 'bg-gray-500'}`} />
-      <span className="text-white font-medium flex-1">{participant.name || participant.identity}</span>
-      {isHost && <span className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full">Host</span>}
-      {!participant.isMicrophoneEnabled && <span className="text-gray-400 text-sm">(muted)</span>}
+    <div style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: '1rem', 
+      padding: '0.75rem', 
+      backgroundColor: '#334155', 
+      borderRadius: '0.5rem'
+    }}>
+      <div style={{ 
+        width: '0.75rem', 
+        height: '0.75rem', 
+        borderRadius: '9999px', 
+        backgroundColor: participant.isSpeaking ? '#10b981' : '#94a3b8'
+      }} />
+      <span style={{ 
+        color: 'white', 
+        fontWeight: '500', 
+        flex: 1 
+      }}>{participant.name || participant.identity}</span>
+      {isHost && <span style={{ 
+        padding: '0.25rem 0.5rem', 
+        fontSize: '0.75rem', 
+        backgroundColor: '#3b82f6', 
+        color: 'white', 
+        borderRadius: '9999px'
+      }}>Host</span>}
+      {!participant.isMicrophoneEnabled && <span style={{ 
+        color: '#94a3b8', 
+        fontSize: '0.875rem'
+      }}>(muted)</span>}
     </div>
   );
 }
