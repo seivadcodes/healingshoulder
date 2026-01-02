@@ -11,7 +11,7 @@ import {
 } from '@livekit/components-react';
 import { Participant } from 'livekit-client';
 import '@livekit/components-styles';
-import { PhoneOff } from 'lucide-react';
+import { PhoneOff, Timer } from 'lucide-react';
 
 type RoomType = 'one-on-one' | 'group';
 type RoomMetadata = {
@@ -19,6 +19,7 @@ type RoomMetadata = {
   type: RoomType;
   hostId: string;
   title: string;
+  callStartedAt: Date | null; // New field
 };
 
 export default function RoomPage() {
@@ -30,6 +31,10 @@ export default function RoomPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
+
+  // Timer state
+  const [elapsedTime, setElapsedTime] = useState<number>(0); // in seconds
+  const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -46,11 +51,12 @@ export default function RoomPage() {
         // Try to find this room in either quick_connect_requests or quick_group_requests
         let roomType: RoomType | null = null;
         let hostId: string | null = null;
+        let callStartedAt: Date | null = null;
 
         // Check 1:1 requests
         const { data: oneOnOne } = await supabase
           .from('quick_connect_requests')
-          .select('user_id, acceptor_id, status, expires_at')
+          .select('user_id, acceptor_id, status, expires_at, call_started_at')
           .eq('room_id', roomId)
           .single();
 
@@ -58,8 +64,8 @@ export default function RoomPage() {
           const now = new Date().toISOString();
           if (new Date(oneOnOne.expires_at) > new Date(now)) {
             roomType = 'one-on-one';
-            // Host is the original poster
             hostId = oneOnOne.user_id;
+            callStartedAt = oneOnOne.call_started_at ? new Date(oneOnOne.call_started_at) : null;
           }
         }
 
@@ -67,7 +73,7 @@ export default function RoomPage() {
         if (!roomType) {
           const { data: group } = await supabase
             .from('quick_group_requests')
-            .select('user_id, status, expires_at')
+            .select('user_id, status, expires_at, call_started_at')
             .eq('room_id', roomId)
             .single();
 
@@ -76,10 +82,10 @@ export default function RoomPage() {
             const isExpired = new Date(group.expires_at) <= new Date(now);
 
             if (!isExpired) {
-              // ✅ FIX: Allow 'available' (host-created) or 'matched' (already joined) for group rooms
               if (group.status === 'available' || group.status === 'matched') {
                 roomType = 'group';
                 hostId = group.user_id;
+                callStartedAt = group.call_started_at ? new Date(group.call_started_at) : null;
               }
             }
           }
@@ -133,8 +139,20 @@ export default function RoomPage() {
           type: roomType,
           hostId,
           title: roomType === 'group' ? 'Group Call' : 'Private Call',
+          callStartedAt,
         });
         setToken(token);
+
+        // Start timer if call has started
+        if (callStartedAt) {
+          const interval = setInterval(() => {
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+            setElapsedTime(diff);
+          }, 1000);
+          setTimerInterval(interval);
+        }
+
       } catch (err) {
         console.error('Room init error:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -146,8 +164,25 @@ export default function RoomPage() {
     initializeRoom();
   }, [roomId, router, supabase]);
 
+  useEffect(() => {
+    // Cleanup timer on unmount
+    return () => {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
+    };
+  }, [timerInterval]);
+
   const handleLeave = () => {
     router.push('/connect');
+  };
+
+  // Format time as HH:MM:SS
+  const formatTime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   if (isLoading) {
@@ -191,6 +226,12 @@ export default function RoomPage() {
           <p className="text-gray-400 mt-1">
             {roomMeta.type === 'group' ? 'Group support call' : 'One-on-one conversation'}
           </p>
+          {roomMeta.callStartedAt && (
+            <div className="flex items-center gap-2 mt-2 text-sm text-gray-300">
+              <Timer className="w-4 h-4" />
+              <span>Call duration: {formatTime(elapsedTime)}</span>
+            </div>
+          )}
         </div>
       </div>
 
