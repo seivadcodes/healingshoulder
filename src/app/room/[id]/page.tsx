@@ -211,6 +211,8 @@ export default function RoomPage() {
 
   // ✅ LEAVE CALL: remove from room_participants AND redirect
  const handleLeave = async () => {
+  if (!roomMeta || !roomId) return;
+
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     router.push('/auth');
@@ -218,33 +220,56 @@ export default function RoomPage() {
   }
 
   const userId = session.user.id;
-  const roomId = params.id as string;
 
-  // 1. Remove self from participants
+  // 1. Remove self from room_participants
   await supabase
     .from('room_participants')
     .delete()
     .eq('room_id', roomId)
     .eq('user_id', userId);
 
-  // 2. If this user is the HOST, mark the request as "completed" to prevent auto-redirect
-  if (roomMeta && roomMeta.hostId === userId) {
-    console.log('[RoomPage] Host is leaving — marking request as completed');
-    
-    if (roomMeta.type === 'one-on-one') {
-      await supabase
-        .from('quick_connect_requests')
-        .update({ status: 'completed', expires_at: new Date().toISOString() })
-        .eq('room_id', roomId);
-    } else {
-      await supabase
-        .from('quick_group_requests')
-        .update({ status: 'completed', expires_at: new Date().toISOString() })
-        .eq('room_id', roomId);
-    }
-  }
+  // 2. For 1:1 calls: end the entire call for both participants
+  if (roomMeta.type === 'one-on-one') {
+    console.log('[RoomPage] Ending 1:1 call for both participants');
 
-  // Optional: notify others via LiveKit disconnect, but not needed for redirect fix
+    // Remove the OTHER participant
+    await supabase
+      .from('room_participants')
+      .delete()
+      .eq('room_id', roomId)
+      .neq('user_id', userId);
+
+    // Mark the request as completed
+    await supabase
+      .from('quick_connect_requests')
+      .update({ 
+        status: 'completed', 
+        expires_at: new Date().toISOString() 
+      })
+      .eq('room_id', roomId);
+
+  // 3. (Optional) For group calls: if host leaves, end the room for everyone
+  // Uncomment the block below if you want group calls to end when host leaves
+  
+  } else if (roomMeta.type === 'group' && roomMeta.hostId === userId) {
+    console.log('[RoomPage] Host leaving group — ending call for all');
+
+    // Remove all participants
+    await supabase
+      .from('room_participants')
+      .delete()
+      .eq('room_id', roomId);
+
+    // Mark group request as completed
+    await supabase
+      .from('quick_group_requests')
+      .update({ 
+        status: 'completed', 
+        expires_at: new Date().toISOString() 
+      })
+      .eq('room_id', roomId);
+  
+  }
 
   router.push('/connect');
 };
