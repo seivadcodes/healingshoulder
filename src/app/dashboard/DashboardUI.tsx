@@ -982,7 +982,7 @@ const PostsSection = ({ posts }: { posts: Post[] }) => (
         padding: '2rem',
       }}>
         <MessageCircle style={{ color: '#d6d3d1', margin: '0 auto', width: '3rem', height: '3rem' }} />
-        <p style={{ color: '#78716c', marginTop: '0.5rem' }}>No posts yet. Be the first to share.</p>
+        <p style={{ color: '#78716c', marginTop: '0.5rem' }}>No posts yet. Post something up above.</p>
         <p style={{ color: '#a8a29e', fontSize: '0.875rem', marginTop: '0.25rem' }}>Your words can comfort others walking a similar path</p>
       </div>
     ) : (

@@ -494,14 +494,21 @@ export default function ConnectPage() {
     }
   };
 
-  const timeAgo = (timestamp: string) => {
-    const now = new Date();
-    const posted = new Date(timestamp);
-    const diff = Math.floor((now.getTime() - posted.getTime()) / 1000);
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    return `${Math.floor(diff / 3600)}h ago`;
-  };
+const timeAgo = (timestamp: string) => {
+  const now = new Date();
+  const posted = new Date(timestamp);
+  const diffSeconds = Math.floor((now.getTime() - posted.getTime()) / 1000);
+
+  if (diffSeconds < 60) {
+    return 'now';
+  }
+  if (diffSeconds < 3600) {
+    const minutes = Math.floor(diffSeconds / 60);
+    return `${minutes} min${minutes === 1 ? '' : 's'} ago`;
+  }
+  const hours = Math.floor(diffSeconds / 3600);
+  return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+};
 
   if (isLoading) {
     return (

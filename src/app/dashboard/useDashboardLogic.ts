@@ -158,48 +158,49 @@ export function useDashboardLogic(): DashboardUIProps {
     init();
   }, [router]);
 
-  useEffect(() => {
-    if (!profile || isLoading) return;
+ useEffect(() => {
+  if (!profile || isLoading) return;
 
-    const loadPosts = async () => {
-      const { data, error } = await supabase
-        .from('posts')
-        .select(`
-          *,
-          profiles: user_id (
-            full_name,
-            avatar_url
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(20);
+  const loadPosts = async () => {
+    const { data, error } = await supabase
+      .from('posts')
+      .select(`
+        *,
+        profiles: user_id (
+          full_name,
+          avatar_url
+        )
+      `)
+      .eq('user_id', profile.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-      if (error) {
-        console.error('Failed to fetch posts:', error);
-        setError('Failed to load posts. Please try again later.');
-        return;
-      }
+    if (error) {
+      console.error('Failed to fetch your posts:', error);
+      setError('Failed to load your posts. Please try again later.');
+      return;
+    }
 
-      const mapped = data.map((p) => ({
-        id: p.id,
-        userId: p.user_id,
-        text: p.text,
-        mediaUrls: p.media_urls || undefined,
-        griefTypes: p.grief_types as GriefType[],
-        createdAt: new Date(p.created_at),
-        likes: p.likes_count || 0,
-        isAnonymous: p.is_anonymous,
-        user: p.profiles ? {
-          fullName: p.profiles.full_name,
-          avatarUrl: p.profiles.avatar_url
-        } : undefined
-      }));
+    const mapped = data.map((p) => ({
+      id: p.id,
+      userId: p.user_id,
+      text: p.text,
+      mediaUrls: p.media_urls || undefined,
+      griefTypes: p.grief_types as GriefType[],
+      createdAt: new Date(p.created_at),
+      likes: p.likes_count || 0,
+      isAnonymous: p.is_anonymous,
+      user: p.profiles ? {
+        fullName: p.profiles.full_name,
+        avatarUrl: p.profiles.avatar_url
+      } : undefined
+    }));
 
-      setPosts(mapped);
-    };
+    setPosts(mapped);
+  };
 
-    loadPosts();
-  }, [profile, isLoading]);
+  loadPosts();
+}, [profile, isLoading]);
 
   useEffect(() => {
     return () => {

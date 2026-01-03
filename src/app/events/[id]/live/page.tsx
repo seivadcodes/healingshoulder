@@ -1,17 +1,22 @@
 // app/events/[id]/live/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { 
   LiveKitRoom, 
+  ParticipantTile,
+  RoomAudioRenderer,
   ControlBar,
+  useTracks,
   useParticipants,
-  DisconnectButton,
-  RoomAudioRenderer
+  useChat,
+  TrackReferenceOrPlaceholder,
+  isTrackReference,
+  DisconnectButton
 } from '@livekit/components-react';
-import { Participant } from 'livekit-client';
+import { Track, Participant } from 'livekit-client';
 import '@livekit/components-styles';
 
 type Event = {
@@ -29,6 +34,7 @@ export default function LiveEventPage() {
   const [token, setToken] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeView, setActiveView] = useState<'chat' | 'participants'>('chat');
   const supabase = createClient();
 
   useEffect(() => {
@@ -142,8 +148,21 @@ export default function LiveEventPage() {
       {/* Header */}
       <div className="pt-16 px-6">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-2xl font-bold text-white">Live: {event.title}</h1>
-          <p className="text-gray-400 mt-1">Hosted by: {hostName}</p>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h1 className="text-2xl font-bold text-white">Live: {event.title}</h1>
+              <p className="text-gray-400 mt-1">Hosted by: {hostName}</p>
+            </div>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setActiveView('chat')}
+                className={`px-4 py-2 rounded-lg transition ${activeView === 'chat' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+              >
+                Chat
+              </button>
+              {/* Participants button commented out */}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -153,25 +172,36 @@ export default function LiveEventPage() {
           token={token}
           serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
           audio={true}
-          video={false}
+          video={true}
           onDisconnected={() => setError('Disconnected from room')}
           className="flex flex-col h-[calc(100vh-180px)]"
         >
-          {/* Participant List */}
-          <div className="flex-1 bg-gray-800 rounded-xl p-6 overflow-y-auto mb-4">
-            <h2 className="text-xl font-bold text-white mb-4">Participants</h2>
-            <AudioParticipantsList hostId={event.host_id} />
+          <div className="flex flex-1 gap-6 min-h-0 h-full"> {/* Left Column - Video Grid */}
+            <div className="flex-1 flex flex-col min-w-0">
+              {/* Main Host Video */}
+              <div className="max-h-[60vh] bg-gray-800 rounded-xl overflow-hidden mb-4 flex-shrink-0">
+                <MainSpeaker hostId={event.host_id} />
+              </div>
+              
+              {/* Other Participants Grid */}
+              <div className="max-h-[30vh] bg-gray-800 rounded-xl p-4 overflow-y-auto flex-shrink-0">
+                <h3 className="text-white font-semibold mb-3">Other Participants</h3>
+                <div className="grid grid-cols-3 gap-4 auto-rows-min">
+                  <OtherParticipants hostId={event.host_id} />
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column - Chat */}
+            <div className="w-96 bg-gray-800 rounded-xl flex flex-col overflow-hidden flex-shrink-0">
+              <CustomChat />
+            </div>
           </div>
           
           {/* Control Bar with Leave Button */}
-          <div className="flex justify-between items-center">
+          <div className="mt-4 flex justify-between items-center">
             <ControlBar 
-              controls={{ 
-                microphone: true, 
-                camera: false, 
-                screenShare: false, 
-                chat: false 
-              }}
+              controls={{ microphone: true, camera: true, screenShare: true }}
               variation='minimal'
               className="!bg-gray-800 !border-t-0 !rounded-lg"
             />
@@ -189,61 +219,180 @@ export default function LiveEventPage() {
   );
 }
 
-// Audio Participants List Component
-function AudioParticipantsList({ hostId }: { hostId: string }) {
+// Main Speaker Component
+function MainSpeaker({ hostId }: { hostId: string }) {
   const participants = useParticipants();
+  const host = participants.find(p => p.identity === hostId);
+  const mainParticipant = host || participants[0];
 
-  // Sort participants: host first, then by speaking status, then alphabetically
-  const sortedParticipants = [...participants].sort((a, b) => {
-    if (a.identity === hostId) return -1;
-    if (b.identity === hostId) return 1;
-    if (a.isSpeaking && !b.isSpeaking) return -1;
-    if (!a.isSpeaking && b.isSpeaking) return 1;
-    return (a.name || a.identity).localeCompare(b.name || b.identity);
-  });
+  const cameraTracks = useTracks([Track.Source.Camera]);
+  const trackRef = cameraTracks.find(track => 
+    isTrackReference(track) && track.participant.identity === mainParticipant?.identity
+  );
+
+  if (!mainParticipant) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <div className="w-32 h-32 mx-auto rounded-full bg-gray-700 flex items-center justify-center mb-4">
+            <svg className="w-16 h-16 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <p className="text-gray-400">Waiting for host to join...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-3">
-      {sortedParticipants.map(participant => (
-        <ParticipantItem 
-          key={participant.sid} 
-          participant={participant} 
-          isHost={participant.identity === hostId} 
+    <div className="h-full w-full relative bg-gray-900">
+      {trackRef && isTrackReference(trackRef) && (
+        <ParticipantTile
+          trackRef={trackRef}
+          className="!h-full !w-full"
         />
-      ))}
+      )}
+      <div className="absolute bottom-4 left-4 bg-black/50 text-white px-3 py-1 rounded-lg">
+        {mainParticipant.name || mainParticipant.identity}
+        {mainParticipant.identity === hostId && (
+          <span className="ml-2 px-2 py-0.5 text-xs bg-blue-500 rounded">Host</span>
+        )}
+      </div>
     </div>
   );
 }
 
-// Individual Participant Item
-function ParticipantItem({ 
-  participant, 
-  isHost 
-}: { 
-  participant: Participant; 
-  isHost: boolean;
-}) {
+// Other Participants Component
+function OtherParticipants({ hostId }: { hostId: string }) {
+  const participants = useParticipants();
+  const allCameraTracks = useTracks([Track.Source.Camera]);
+  
+  const otherTracks = allCameraTracks.filter(track => 
+    isTrackReference(track) && track.participant.identity !== hostId
+  );
+
+  const placeholderCount = Math.max(0, 3 - otherTracks.length);
+
   return (
-    <div className="flex items-center gap-4 p-3 bg-gray-700 rounded-lg">
-      {/* Speaking indicator */}
-      <div className={`w-3 h-3 rounded-full ${participant.isSpeaking ? 'bg-green-500' : 'bg-gray-500'}`} />
+    <>
+      {otherTracks.map((trackRef) => (
+        <div key={trackRef.participant.sid} className="aspect-video bg-gray-900 rounded-lg overflow-hidden relative">
+          {isTrackReference(trackRef) && (
+            <ParticipantTile
+              trackRef={trackRef}
+              className="!h-full !w-full"
+            />
+          )}
+          <div className="absolute bottom-1 left-1 right-1 bg-black/50 text-white text-xs px-2 py-1 rounded truncate">
+            {trackRef.participant.name || trackRef.participant.identity}
+          </div>
+        </div>
+      ))}
       
-      {/* Participant name */}
-      <span className="text-white font-medium flex-1">
-        {participant.name || participant.identity}
-      </span>
-      
-      {/* Host badge */}
-      {isHost && (
-        <span className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-          Host
-        </span>
-      )}
-      
-      {/* Mute status */}
-      {!participant.isMicrophoneEnabled && (
-        <span className="text-gray-400 text-sm">(muted)</span>
-      )}
+      {Array.from({ length: placeholderCount }).map((_, i) => (
+        <div key={`placeholder-${i}`} className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
+          <svg className="w-8 h-8 text-gray-700" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+          </svg>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// Custom Chat Component
+function CustomChat() {
+  const { chatMessages, send } = useChat();
+  const [message, setMessage] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatMessages]);
+
+  const handleSend = () => {
+    if (message.trim()) {
+      send(message);
+      setMessage('');
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Chat Header */}
+      <div className="p-4 border-b border-gray-700 flex-shrink-0">
+        <h3 className="text-white font-semibold">Live Chat</h3>
+        <p className="text-gray-400 text-sm">Send messages to everyone</p>
+      </div>
+
+      {/* Messages Container */}
+      {/* Messages Container */}
+<div className="flex-1 overflow-y-auto p-4 space-y-4 max-h-[400px]">
+        {chatMessages.length === 0 ? (
+          <div className="text-center text-gray-500 mt-8">
+            <svg className="w-12 h-12 mx-auto mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <p>No messages yet. Start the conversation!</p>
+          </div>
+        ) : (
+          <>
+            {chatMessages.map((msg, idx) => (
+              <div 
+                key={idx} 
+                className={`p-3 rounded-lg max-w-[85%] ${msg.from?.isLocal ? 'ml-auto bg-blue-600' : 'bg-gray-700'}`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`font-semibold text-sm ${msg.from?.isLocal ? 'text-blue-100' : 'text-gray-300'}`}>
+                    {msg.from?.name || 'Anonymous'}
+                  </span>
+                  <span className="text-xs opacity-75">
+                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <p className="text-white break-words">{msg.message}</p>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </>
+        )}
+      </div>
+
+      {/* Message Input */}
+      <div className="p-4 border-t border-gray-700 flex-shrink-0">
+        <div className="flex gap-2">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="Type your message..."
+            className="flex-1 bg-gray-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            rows={2}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!message.trim()}
+            className="self-end px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            Send
+          </button>
+        </div>
+        <p className="text-gray-400 text-xs mt-2">
+          Press Enter to send, Shift+Enter for new line
+        </p>
+      </div>
     </div>
   );
 }

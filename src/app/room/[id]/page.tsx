@@ -612,12 +612,9 @@ function MuteButton() {
 // Phone call specific participant component (now only shows the other participant)
 function PhoneCallParticipants({ hostId }: { hostId: string }) {
   const participants = useParticipants();
-  const { localParticipant } = useLocalParticipant();
-
-  // Always exclude the local user
-  const remoteParticipants = participants.filter(p => p !== localParticipant);
-
-  if (remoteParticipants.length === 0) {
+  
+  // In one-on-one calls, we expect exactly 2 participants
+  if (participants.length < 2) {
     return (
       <div style={{ 
         textAlign: 'center', 
@@ -629,9 +626,9 @@ function PhoneCallParticipants({ hostId }: { hostId: string }) {
     );
   }
 
-  // In 1:1, there should be only one remote participant
-  const otherParticipant = remoteParticipants[0];
-
+  // Get the other participant (not the current user/host)
+  const otherParticipant = participants.find(p => p.identity !== hostId) || participants[0];
+  
   return (
     <div style={{ 
       display: 'flex', 
@@ -639,6 +636,7 @@ function PhoneCallParticipants({ hostId }: { hostId: string }) {
       alignItems: 'center',
       gap: '2.5rem'
     }}>
+      {/* Show only the other participant */}
       <div style={{ 
         display: 'flex', 
         flexDirection: 'column', 
