@@ -37,7 +37,7 @@ const griefGradients: Record<string, string> = {
 const defaultGradient = 'linear-gradient(135deg, #fcd34d, #f97316)';
 
 export default function CommunitiesPage() {
-  const [communities, setCommunities] = useState<Community[]>([]);
+ const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [totalOnline, setTotalOnline] = useState(0);
@@ -187,7 +187,7 @@ export default function CommunitiesPage() {
   };
 
   const innerContainerStyle: React.CSSProperties = {
-    maxWidth: '896px', // ~4xl
+    maxWidth: '896px',
     margin: '0 auto',
   };
 
@@ -246,7 +246,7 @@ export default function CommunitiesPage() {
               fontWeight: '600',
             }}
           >
-            🟢 {totalOnline} people in communities right now
+            🟢 {totalOnline} {totalOnline === 1 ? 'person' : 'people'} in communities right now.
           </div>
         </div>
 
@@ -489,7 +489,7 @@ export default function CommunitiesPage() {
         </div>
       </div>
 
-      {/* Animation for loading spinner */}
+      {/* Optional: define animation if not in global CSS */}
       <style jsx>{`
         @keyframes spin {
           to {
