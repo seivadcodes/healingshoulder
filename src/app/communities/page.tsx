@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Users, MessageCircle, Heart, Plus } from 'lucide-react';
+import { Users, MessageCircle, Heart, Plus, Eye, UserPlus } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -179,17 +179,29 @@ export default function CommunitiesPage() {
 
   const containerStyle: React.CSSProperties = {
     minHeight: '100vh',
-  background: 'linear-gradient(to bottom, #fffbeb, #f5f5f1, #f0f0ee)',
-  paddingTop: '5rem',
-  paddingBottom: '2rem',
-  paddingLeft: '1rem',
-  paddingRight: '1rem',
+    background: 'linear-gradient(to bottom, #fffbeb, #f5f5f1, #f0f0ee)',
+    paddingTop: '5rem',
+    paddingBottom: '2rem',
+    paddingLeft: '1rem',
+    paddingRight: '1rem',
   };
 
   const innerContainerStyle: React.CSSProperties = {
     maxWidth: '896px', // ~4xl
     margin: '0 auto',
   };
+
+  const buttonStyle = {
+    padding: '0.5rem 1rem',
+    borderRadius: '0.5rem',
+    cursor: 'pointer',
+    fontWeight: '600',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    border: 'none',
+    fontSize: '0.875rem',
+  } as React.CSSProperties;
 
   return (
     <div style={containerStyle}>
@@ -241,116 +253,137 @@ export default function CommunitiesPage() {
         {/* Communities List */}
         <div style={{ marginBottom: '3rem' }}>
           {communities.map((community) => (
-            <Link
+            <div
               key={community.id}
-              href={`/communities/${community.id}`}
               style={{
-                display: 'block',
-                textDecoration: 'none',
-                transition: 'transform 0.15s ease-in-out',
+                background: 'white',
+                borderRadius: '0.75rem',
+                border: '1px solid #e2e8f0',
+                padding: '1.25rem',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                transition: 'box-shadow 0.2s ease',
+                marginBottom: '1.25rem',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.01)')}
-              onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.08)')}
+              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)')}
             >
-              <div
-                style={{
-                  background: 'white',
-                  borderRadius: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  padding: '1.25rem',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-                  transition: 'box-shadow 0.2s ease',
-                  marginBottom: '1.25rem',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.08)')}
-                onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)')}
-              >
-                {/* Cover Photo */}
-                {community.cover_photo_url && (
-                  <div
+              {/* Cover Photo */}
+              {community.cover_photo_url && (
+                <div
+                  style={{
+                    height: '6rem',
+                    borderRadius: '0.5rem',
+                    overflow: 'hidden',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <img
+                    src={community.cover_photo_url}
+                    alt={community.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).parentElement!.style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Header Section */}
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.75rem' }}>
+                <div
+                  style={{
+                    width: '3rem',
+                    height: '3rem',
+                    borderRadius: '9999px',
+                    background: griefGradients[community.grief_type] || defaultGradient,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Users size={20} color="white" />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <h2
                     style={{
-                      height: '6rem',
-                      borderRadius: '0.5rem',
+                      fontWeight: '700',
+                      color: '#1e293b',
+                      fontSize: '1.125rem',
+                      whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      marginBottom: '1rem',
+                      textOverflow: 'ellipsis',
                     }}
                   >
-                    <img
-                      src={community.cover_photo_url}
-                      alt={community.name}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).parentElement!.style.display = 'none';
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* Header Section */}
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.75rem' }}>
-                  <div
+                    {community.name}
+                  </h2>
+                  <p
                     style={{
-                      width: '3rem',
-                      height: '3rem',
-                      borderRadius: '9999px',
-                      background: griefGradients[community.grief_type] || defaultGradient,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
+                      color: '#64748b',
+                      fontSize: '0.875rem',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
                     }}
                   >
-                    <Users size={20} color="white" />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <h2
-                      style={{
-                        fontWeight: '700',
-                        color: '#1e293b',
-                        fontSize: '1.125rem',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {community.name}
-                    </h2>
-                    <p
-                      style={{
-                        color: '#64748b',
-                        fontSize: '0.875rem',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {community.description}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <Users size={14} style={{ color: '#94a3b8' }} />
-                    {community.member_count.toLocaleString()} members
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <Heart size={14} style={{ color: '#16a34a' }} />
-                    {community.online_count} online
-                  </span>
-                </div>
-
-                {/* Activity */}
-                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
-                  <MessageCircle size={16} style={{ color: '#f59e0b', marginTop: '0.125rem' }} />
-                  <p>
-                    {formatRecentActivity(community.created_at)}: Someone just shared a memory
+                    {community.description}
                   </p>
                 </div>
               </div>
-            </Link>
+
+              {/* Stats */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <Users size={14} style={{ color: '#94a3b8' }} />
+                  {community.member_count.toLocaleString()} members
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <Heart size={14} style={{ color: '#16a34a' }} />
+                  {community.online_count} online
+                </span>
+              </div>
+
+              {/* Activity */}
+              <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.875rem', color: '#334155', marginBottom: '1rem' }}>
+                <MessageCircle size={16} style={{ color: '#f59e0b', marginTop: '0.125rem' }} />
+                <p>
+                  {formatRecentActivity(community.created_at)}: Someone just shared a memory
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                <Link href={`/communities/${community.id}`} passHref>
+                  <button
+                    style={{
+                      ...buttonStyle,
+                      background: '#e2e8f0',
+                      color: '#334155',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#cbd5e1')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = '#e2e8f0')}
+                  >
+                    <Eye size={16} />
+                    View
+                  </button>
+                </Link>
+                <Link href={`/communities/${community.id}`} passHref>
+                  <button
+                    style={{
+                      ...buttonStyle,
+                      background: '#f59e0b',
+                      color: 'white',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#e18c07')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = '#f59e0b')}
+                  >
+                    <UserPlus size={16} />
+                    Join
+                  </button>
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
 
@@ -456,7 +489,7 @@ export default function CommunitiesPage() {
         </div>
       </div>
 
-      {/* Optional: define animation if not in global CSS */}
+      {/* Animation for loading spinner */}
       <style jsx>{`
         @keyframes spin {
           to {
