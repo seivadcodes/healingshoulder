@@ -79,16 +79,40 @@ export default function CommunitiesPage() {
   }, [supabase]);
 
   const formatRecentActivity = (createdAt: string) => {
-    const now = new Date();
-    const created = new Date(createdAt);
-    const diffMinutes = Math.floor((now.getTime() - created.getTime()) / 60000);
-    if (diffMinutes < 1) return 'Just now';
-    if (diffMinutes < 2) return '1 minute ago';
-    if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
-    if (diffMinutes < 120) return '1 hour ago';
-    const hours = Math.floor(diffMinutes / 60);
-    return `${hours} hours ago`;
-  };
+  const now = new Date();
+  const created = new Date(createdAt);
+  const diffMs = now.getTime() - created.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  // Less than 1 minute
+  if (diffMs < 60 * 1000) return 'Just now';
+  
+  // Minutes
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  if (diffMinutes < 60) {
+    return diffMinutes === 1 ? '1 minute ago' : `${diffMinutes} minutes ago`;
+  }
+
+  // Hours
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 24) {
+    return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`;
+  }
+
+  // Days
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+
+  // Weeks
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffDays < 28) {
+    return diffWeeks === 1 ? '1 week ago' : `${diffWeeks} weeks ago`;
+  }
+
+  // Months (approximate: 1 month = 30 days)
+  const diffMonths = Math.floor(diffDays / 30);
+  return diffMonths === 1 ? '1 month ago' : `${diffMonths} months ago`;
+};
 
   const handleRequestCommunity = () => {
     if (!user) {
