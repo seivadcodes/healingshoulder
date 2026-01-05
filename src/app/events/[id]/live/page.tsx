@@ -305,7 +305,7 @@ export default function LiveEventPage() {
 
 function MainSpeaker({ hostId, isMobile }: { hostId: string; isMobile: boolean }) {
   const participants = useParticipants();
-  const { localParticipant } = useLocalParticipant();
+
   const mainParticipant = participants.find(p => p.identity === hostId) || participants[0];
 
   // Get CAMERA track of main participant

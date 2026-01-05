@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
   LiveKitRoom,
-  ControlBar,
+  
   useParticipants,
   useLocalParticipant,
   RoomAudioRenderer,
@@ -35,9 +35,117 @@ export default function RoomPage() {
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
   const [callEndedByPeer, setCallEndedByPeer] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const supabase = createClient();
- const broadcastChannelRef = useRef<RealtimeChannel | null>(null);
+  const broadcastChannelRef = useRef<RealtimeChannel | null>(null);
+
+
+   const checkAndStartTimer = useCallback(
+  async (roomId: string, roomType: RoomType, userId: string) => {
+    // Avoid re-entrancy if timer already running
+    if (timerInterval) return;
+
+    try {
+      if (roomType === 'one-on-one') {
+        const { count } = await supabase
+          .from('room_participants')
+          .select('*', { count: 'exact', head: true })
+          .eq('room_id', roomId);
+
+        if ((count || 0) < 2) {
+          return;
+        }
+
+        const { data: req } = await supabase
+          .from('quick_connect_requests')
+          .select('call_started_at')
+          .eq('room_id', roomId)
+          .single();
+
+        const callStartedAt = req?.call_started_at ? new Date(req.call_started_at) : null;
+
+        if (callStartedAt) {
+          const now = new Date();
+          const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+          setElapsedTime(diff);
+          const interval = setInterval(() => {
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+            setElapsedTime(diff);
+          }, 1000);
+          setTimerInterval(interval);
+        } else {
+          const now = new Date();
+          await supabase
+            .from('quick_connect_requests')
+            .update({ call_started_at: now.toISOString() })
+            .eq('room_id', roomId);
+
+          setRoomMeta((prev) => (prev ? { ...prev, callStartedAt: now } : null));
+          setElapsedTime(0);
+          const interval = setInterval(() => {
+            setElapsedTime((prev) => prev + 1);
+          }, 1000);
+          setTimerInterval(interval);
+        }
+      } else if (roomType === 'group') {
+        const { data: group } = await supabase
+          .from('quick_group_requests')
+          .select('call_started_at, user_id')
+          .eq('room_id', roomId)
+          .single();
+
+        if (!group) return;
+
+        const isHost = userId === group.user_id;
+        const callStartedAt = group.call_started_at ? new Date(group.call_started_at) : null;
+
+        if (isHost) {
+          if (!callStartedAt) {
+            const now = new Date();
+            await supabase
+              .from('quick_group_requests')
+              .update({ call_started_at: now.toISOString() })
+              .eq('room_id', roomId);
+
+            setRoomMeta((prev) => (prev ? { ...prev, callStartedAt: now } : null));
+            setElapsedTime(0);
+            const interval = setInterval(() => {
+              setElapsedTime((prev) => prev + 1);
+            }, 1000);
+            setTimerInterval(interval);
+          } else {
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+            setElapsedTime(diff);
+            const interval = setInterval(() => {
+              const now = new Date();
+              const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+              setElapsedTime(diff);
+            }, 1000);
+            setTimerInterval(interval);
+          }
+        } else {
+          if (callStartedAt) {
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+            setElapsedTime(diff);
+            const interval = setInterval(() => {
+              const now = new Date();
+              const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
+              setElapsedTime(diff);
+            }, 1000);
+            setTimerInterval(interval);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error in checkAndStartTimer:', err);
+    }
+  },
+  [supabase, timerInterval, setRoomMeta, setTimerInterval, setElapsedTime]
+);
 
   // 🔴 Set up Supabase broadcast listener for call_ended
   useEffect(() => {
@@ -74,6 +182,7 @@ export default function RoomPage() {
           return;
         }
         const userId = session.user.id;
+        setCurrentUserId(userId);
 
         let roomType: RoomType | null = null;
         let hostId: string | null = null;
@@ -148,11 +257,17 @@ export default function RoomPage() {
         }
         const { token } = await tokenRes.json();
 
-        setRoomMeta({ id: roomId, type: roomType, hostId, title: roomType === 'group' ? 'Group Call' : 'Private Call', callStartedAt });
+        setRoomMeta({ 
+          id: roomId, 
+          type: roomType, 
+          hostId, 
+          title: roomType === 'group' ? 'Group Call' : 'Private Call', 
+          callStartedAt 
+        });
         setToken(token);
 
         // Start or initialize timer
-        await checkAndStartTimer(roomId, roomType, userId, );
+        await checkAndStartTimer(roomId, roomType, userId);
 
       } catch (err) {
         console.error('[RoomPage] Init error:', err);
@@ -163,7 +278,7 @@ export default function RoomPage() {
     };
 
     initializeRoom();
-  }, [roomId, router, supabase]);
+  }, [roomId, router, supabase, checkAndStartTimer]);
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -172,125 +287,46 @@ export default function RoomPage() {
     };
   }, [timerInterval]);
 
-  // 🔴 Realtime listener for room_participants changes
-// 🔴 Realtime listener for room_participants changes (for group rooms)
-useEffect(() => {
-  if (!roomId || !roomMeta || roomMeta.type !== 'group') {
-    return;
-  }
-
-  const participantsChannel = supabase
-    .channel(`room_participants:${roomId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'room_participants',
-        filter: `room_id=eq.${roomId}`,
-      },
-      async (payload) => {
-        console.log('[RoomPage] room_participants changed:', payload);
-
-        // ✅ Safely get session with await
-        const sessionResponse = await supabase.auth.getSession();
-        if (!sessionResponse.data.session) {
-          console.warn('No session during participant change');
-          return;
-        }
-        const userId = sessionResponse.data.session.user.id;
-
-        // Re-check and possibly start timer
-        await checkAndStartTimer(roomId, roomMeta.type, userId);
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(participantsChannel);
-  };
-}, [roomId, roomMeta, supabase]);
-
-  // Helper: attempt to start timer (and set call_started_at if needed)
- const checkAndStartTimer = async (
-  roomId: string,
-  roomType: RoomType,
-  userId: string
-) => {
-  // Avoid re-entrancy if timer already running
-  if (timerInterval) return;
-
-  const { count } = await supabase
-    .from('room_participants')
-    .select('*', { count: 'exact', head: true })
-    .eq('room_id', roomId);
-
-  if ((count || 0) >= 2) {
-    // Fetch current call_started_at from DB to avoid race conditions
-    let callStartedAt: Date | null = null;
-
-    if (roomType === 'one-on-one') {
-      const { data: req } = await supabase
-        .from('quick_connect_requests')
-        .select('call_started_at')
-        .eq('room_id', roomId)
-        .single();
-      callStartedAt = req?.call_started_at ? new Date(req.call_started_at) : null;
-    } else {
-      const { data: req } = await supabase
-        .from('quick_group_requests')
-        .select('call_started_at')
-        .eq('room_id', roomId)
-        .single();
-      callStartedAt = req?.call_started_at ? new Date(req.call_started_at) : null;
-    }
-
-    if (callStartedAt) {
-      // Timer already started by someone else — sync with it
-      const now = new Date();
-      const diff = Math.floor((now.getTime() - callStartedAt.getTime()) / 1000);
-      setElapsedTime(diff);
-      const interval = setInterval(() => {
-        const now = new Date();
-        const diff = Math.floor((now.getTime() - callStartedAt!.getTime()) / 1000);
-        setElapsedTime(diff);
-      }, 1000);
-      setTimerInterval(interval);
-    } else {
-      // Start new timer
-      const now = new Date();
-      const table = roomType === 'one-on-one' ? 'quick_connect_requests' : 'quick_group_requests';
-      await supabase
-        .from(table)
-        .update({ call_started_at: now.toISOString() })
-        .eq('room_id', roomId);
-
-      setRoomMeta((prev) => (prev ? { ...prev, callStartedAt: now } : null));
-      setElapsedTime(0);
-      const interval = setInterval(() => {
-        setElapsedTime((prev) => prev + 1);
-      }, 1000);
-      setTimerInterval(interval);
-    }
-  }
-};
-
-  // ✅ LEAVE CALL: remove from room_participants, broadcast if 1:1, AND redirect
-  const handleLeave = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      router.push('/auth');
+  // 🔴 Realtime listener for room_participants changes (for group rooms)
+  useEffect(() => {
+    if (!roomId || !roomMeta || roomMeta.type !== 'group' || !currentUserId) {
       return;
     }
 
-    const userId = session.user.id;
+    const participantsChannel = supabase
+      .channel(`room_participants:${roomId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'room_participants',
+          filter: `room_id=eq.${roomId}`,
+        },
+        async (payload) => {
+          console.log('[RoomPage] room_participants changed:', payload);
+          await checkAndStartTimer(roomId, roomMeta.type, currentUserId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(participantsChannel);
+    };
+}, [roomId, roomMeta, supabase, currentUserId, checkAndStartTimer]); // ✅ added
+
+  // Helper: attempt to start timer (and set call_started_at if needed)
+
+  // ✅ LEAVE CALL: remove from room_participants, broadcast if 1:1, AND redirect
+  const handleLeave = async () => {
+    if (!currentUserId) return;
 
     // 1. Remove self from participants
     await supabase
       .from('room_participants')
       .delete()
       .eq('room_id', roomId)
-      .eq('user_id', userId);
+      .eq('user_id', currentUserId);
 
     // 2. Broadcast call_ended AND mark as completed if it's a one-on-one call
     if (roomMeta?.type === 'one-on-one' && broadcastChannelRef.current) {
@@ -299,7 +335,7 @@ useEffect(() => {
         broadcastChannelRef.current.send({
           type: 'broadcast',
           event: 'call_ended',
-          payload: { by: userId },
+          payload: { by: currentUserId },
         });
 
         // Mark room as completed in DB
@@ -503,33 +539,19 @@ useEffect(() => {
           }}>
             Group support call
           </p>
-          {/* 🔴 TIMER DISPLAY */}
-          {roomMeta.callStartedAt || elapsedTime > 0 ? (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.5rem', 
-              marginTop: '0.5rem',
-              color: '#10b981',
-              fontFamily: 'monospace',
-              fontSize: '0.875rem'
-            }}>
-              <Timer style={{ width: '1rem', height: '1rem' }} />
-              <span>Call duration: {formatTime(elapsedTime)}</span>
-            </div>
-          ) : (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.5rem', 
-              marginTop: '0.5rem',
-              color: '#f59e0b',
-              fontSize: '0.875rem'
-            }}>
-              <Timer style={{ width: '1rem', height: '1rem' }} />
-              <span>Waiting for participants...</span>
-            </div>
-          )}
+          {/* 🔴 ALWAYS SHOW TIMER FOR GROUP CALLS */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem', 
+            marginTop: '0.5rem',
+            color: '#10b981',
+            fontFamily: 'monospace',
+            fontSize: '0.875rem'
+          }}>
+            <Timer style={{ width: '1rem', height: '1rem' }} />
+            <span>Call duration: {formatTime(elapsedTime)}</span>
+          </div>
         </div>
       </div>
 
@@ -575,16 +597,16 @@ useEffect(() => {
             justifyContent: 'space-between', 
             alignItems: 'center'
           }}>
-            <ControlBar
-              controls={{ microphone: true, camera: false, screenShare: false, chat: false }}
-              variation="minimal"
-              style={{ 
-                backgroundColor: '#1e293b', 
-                border: 'none', 
-                borderRadius: '0.75rem',
-                padding: '0.5rem 1rem'
-              }}
-            />
+            <div style={{
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  backgroundColor: '#1e293b',
+  borderRadius: '0.75rem',
+  padding: '0.5rem 1rem',
+}}>
+  <MuteButton />
+</div>
             <button
               onClick={handleLeave}
               style={{
