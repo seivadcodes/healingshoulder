@@ -170,7 +170,7 @@ export default function HomePage() {
 
       {/* Live Presence Indicator */}
       <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-        <span
+        {/*<span
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -185,7 +185,7 @@ export default function HomePage() {
         >
           <span style={{ width: '0.5rem', height: '0.5rem', backgroundColor: '#10b981', borderRadius: '50%', display: 'inline-block' }}></span>
           {onlineCount} people online · Tap to connect
-        </span>
+        </span>*/}
       </div>
 
       {/* Live Activity Feed */}
