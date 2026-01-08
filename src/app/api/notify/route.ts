@@ -1,58 +1,59 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { NextRequest } from 'next/server';
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { toUserId, fromUserId, fromUserName, roomName, callType, conversationId } = await req.json();
-    
-    if (!toUserId || !fromUserId || !roomName || !callType) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+    const body = await request.json();
+    const { type } = body;
+
+    // Handle different notification types with appropriate validation
+    if (type === 'call_accepted' || type === 'call_ended') {
+      const { toUserId, roomName } = body;
+      if (!toUserId || !roomName) {
+        return Response.json(
+          { error: 'Missing required fields for call event' },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Initial call notification validation
+      const {
+        toUserId,
+        callerId,
+        callerName,
+        roomName,
+        callType,
+      } = body;
+
+      if (!toUserId || !callerId || !callerName || !roomName || !callType) {
+        return Response.json(
+          { error: 'Missing required fields for initial call' },
+          { status: 400 }
+        );
+      }
     }
 
-    // Get recipient's WebSocket connection ID from the database
-    const supabase = createClient();
-    const { data: recipient, error: recipientError } = await supabase
-      .from('profiles')
-      .select('ws_connection_id')
-      .eq('id', toUserId)
-      .single();
-
-    if (recipientError || !recipient || !recipient.ws_connection_id) {
-      console.log('CallCheck: Recipient not found or not connected', toUserId);
-      // Don't fail the request - just log that recipient isn't available
-      return NextResponse.json({ success: true, message: 'Recipient not currently connected' });
-    }
-
-    // Send notification to the WebSocket server
-    const wsServerUrl = `http://178.128.210.229:8084/notify`;
-    const response = await fetch(wsServerUrl, {
+    // Forward notification to signaling server
+    const signalingRes = await fetch('http://178.128.210.229:8084/notify', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        connectionId: recipient.ws_connection_id,
-        payload: {
-          type: 'incoming_call',
-          fromUserId,
-          fromUserName,
-          roomName,
-          callType,
-          conversationId,
-        },
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      console.error('CallCheck: Failed to notify recipient via WebSocket server', errorData);
-      return NextResponse.json({ success: false, error: 'Failed to notify recipient' }, { status: 500 });
+    if (!signalingRes.ok) {
+      const errorData = await signalingRes.json();
+      console.error('Signaling server error:', errorData);
+      return Response.json(
+        { error: 'Failed to notify signaling server' },
+        { status: 500 }
+      );
     }
 
-    console.log(`CallCheck: Successfully notified ${toUserId} about call from ${fromUserId}`);
-    return NextResponse.json({ success: true });
+    return Response.json({ ok: true });
   } catch (err) {
-    console.error('CallCheck notification error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Notify API error:', err);
+    return Response.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

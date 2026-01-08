@@ -1,11 +1,12 @@
 import { Room, LocalTrack } from 'livekit-client';
 import { createClient } from '@/lib/supabase/client';
 
-export async function joinCallRoom(roomName: string, callType: 'audio' | 'video') {
+export async function joinCallRoom(roomName: string) {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
+  
   if (!session?.user) throw new Error('Not authenticated');
-
+  
   const currentUserId = session.user.id;
   const userName = session.user.user_metadata?.full_name || session.user.email || 'Anonymous';
 
@@ -15,14 +16,15 @@ export async function joinCallRoom(roomName: string, callType: 'audio' | 'video'
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ room: roomName, identity: currentUserId, name: userName }),
   });
-
+  
   if (!tokenRes.ok) {
     const errData = await tokenRes.json().catch(() => ({}));
     throw new Error(errData.error || 'Failed to get call token');
   }
+  
   const { token } = await tokenRes.json();
 
-  // Connect
+  // Connect to room
   const room = new Room();
   await room.connect(process.env.NEXT_PUBLIC_LIVEKIT_URL!, token);
 
@@ -38,24 +40,9 @@ export async function joinCallRoom(roomName: string, callType: 'audio' | 'video'
     console.warn('CallCheck: Audio track creation failed', e);
   }
 
-  // Create and publish video track if needed
-  let videoTrack: LocalTrack | null = null;
-  if (callType === 'video') {
-    try {
-      const tracks = await room.localParticipant.createTracks({ video: true });
-      if (tracks[0]) {
-        await room.localParticipant.publishTrack(tracks[0]);
-        videoTrack = tracks[0];
-      }
-    } catch (e) {
-      console.warn('CallCheck: Video track creation failed', e);
-    }
-  }
-
-  console.log('CallCheck: Caller joined room successfully');
+  console.log('CallCheck: Joined room successfully');
   return {
     room,
     localAudioTrack: audioTrack,
-    localVideoTrack: videoTrack,
   };
 }

@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { useCall } from '@/context/CallContext'; // 👈 Add this
+import { useCall } from '@/context/CallContext';
 
 type Profile = {
   id: string;
@@ -12,14 +12,35 @@ type Profile = {
   avatar_url?: string | null;
 };
 
+export interface IncomingCall {
+  callerId: string;
+  callerName: string;
+  roomName: string;
+  callType: 'audio' | 'video';
+  conversationId: string;
+}
+
 export default function TestCallPage() {
   const { user: currentUser } = useAuth();
   const supabase = createClient();
-  const { incomingCall, setIncomingCall } = useCall(); // 👈 Get call state
+  const { incomingCall, setIncomingCall } = useCall();
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
+  
+  // Call state management
+  const [callState, setCallState] = useState<'idle' | 'calling' | 'ringing' | 'connected' | 'ended'>('idle');
+  const [callTimer, setCallTimer] = useState(0);
+  const [calleeName, setCalleeName] = useState('');
+  const callStartTimeRef = useRef<number | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const ringingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const callStateRef = useRef(callState);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
 
   useEffect(() => {
     const fetchUsersAndProfile = async () => {
@@ -54,12 +75,142 @@ export default function TestCallPage() {
     fetchUsersAndProfile();
   }, [currentUser?.id, supabase]);
 
+  // Handle call timer
+  useEffect(() => {
+    if (callState === 'connected' && callStartTimeRef.current) {
+      timerIntervalRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - callStartTimeRef.current!) / 1000);
+        setCallTimer(elapsed);
+      }, 1000);
+    }
+    
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [callState]);
+
+  // Handle call state transitions
+  useEffect(() => {
+    if (callState === 'calling') {
+      ringingTimeoutRef.current = setTimeout(() => {
+        setCallState('ringing');
+      }, 2000);
+    } else if (callState === 'ringing') {
+      ringingTimeoutRef.current = setTimeout(() => {
+        setCallState('ended');
+        toast('CallCheck timed out', { icon: '⏰' });
+      }, 30000);
+    } else if (callState === 'connected') {
+      callStartTimeRef.current = Date.now();
+    } else if (callState === 'ended') {
+      const resetTimeout = setTimeout(() => {
+        setCallState('idle');
+        setCalleeName('');
+        setCallTimer(0);
+        callStartTimeRef.current = null;
+      }, 1000);
+      return () => clearTimeout(resetTimeout);
+    }
+
+    return () => {
+      if (ringingTimeoutRef.current) {
+        clearTimeout(ringingTimeoutRef.current);
+      }
+    };
+  }, [callState]);
+
+  // 🔥 Fixed WebSocket listener with proper dependencies
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const ws = new WebSocket(`ws://178.128.210.229:8084?userId=${currentUser.id}`);
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        const { type } = msg;
+
+        if (type === 'incoming_call') {
+          setIncomingCall({
+            callerId: msg.callerId,
+            callerName: msg.callerName,
+            roomName: msg.roomName,
+            callType: msg.callType,
+            conversationId: msg.conversationId,
+          });
+        }
+        else if (type === 'call_accepted') {
+          // Use ref to get latest call state
+          if (callStateRef.current === 'ringing' || callStateRef.current === 'calling') {
+            if (ringingTimeoutRef.current) {
+              clearTimeout(ringingTimeoutRef.current);
+              ringingTimeoutRef.current = null;
+            }
+            setCallState('connected');
+            callStartTimeRef.current = Date.now();
+          }
+        }
+        else if (type === 'call_ended') {
+          if (callStateRef.current === 'connected' || callStateRef.current === 'ringing') {
+            setCallState('ended');
+          }
+        }
+      } catch (e) {
+        console.error('WebSocket message error', e);
+      }
+    };
+
+    ws.onopen = () => console.log('✅ WebSocket connected');
+    ws.onerror = (err) => console.error('WebSocket error:', err);
+    ws.onclose = () => console.log('WebSocket disconnected');
+
+    return () => ws.close();
+  }, [currentUser?.id]); // Only depend on user ID
+
+  const handleAccept = async () => {
+    if (!incomingCall) return;
+
+    const callerName = incomingCall.callerName || 'User';
+    setCalleeName(callerName);
+    setCallState('connected');
+    callStartTimeRef.current = Date.now();
+    setIncomingCall(null);
+
+    try {
+      await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toUserId: incomingCall.callerId,
+          type: 'call_accepted',
+          roomName: incomingCall.roomName,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to send call accepted', err);
+    }
+  };
+
+  const handleDecline = () => {
+    setIncomingCall(null);
+    toast('CallCheck declined', { icon: '📞' });
+    
+    if (callState !== 'idle' && callState !== 'ended') {
+      setCallState('ended');
+    }
+  };
+
   const handleCall = async () => {
     if (!selectedUserId || !currentUser?.id || !currentUserProfile) return;
 
-    const fromUserName = currentUserProfile.full_name || currentUser.email?.split('@')[0] || 'User';
+    const callerName = currentUserProfile.full_name || currentUser.email?.split('@')[0] || 'User';
     const callee = users.find(u => u.id === selectedUserId);
     const calleeName = callee?.full_name || 'Recipient';
+
+    setCalleeName(calleeName);
+    setCallState('calling');
 
     const roomName = `call-test-${Date.now()}`;
     const callType: 'audio' | 'video' = 'video';
@@ -70,64 +221,207 @@ export default function TestCallPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           toUserId: selectedUserId,
-          fromUserId: currentUser.id,
-          fromUserName,
+          callerId: currentUser.id,
+          callerName,
           roomName,
           callType,
           conversationId: `test-conv-${currentUser.id}-${selectedUserId}`,
         }),
       });
 
-      if (res.ok) {
-        toast.success(`CallCheck sent to ${calleeName}!`);
-      } else {
+      if (!res.ok) {
         const errorData = await res.json();
         console.error('CallCheck failed:', errorData);
         toast.error('Failed to send call');
+        setCallState('ended');
       }
     } catch (err) {
       console.error('CallCheck error:', err);
       toast.error('Network error: failed to send call');
+      setCallState('ended');
     }
   };
 
-  // ✅ Handle incoming call acceptance
-  const handleAccept = () => {
-    if (!incomingCall) return;
-    alert(`✅ Accepted call from ${incomingCall.fromUserName}! Room: ${incomingCall.roomName}`);
-    setIncomingCall(null); // dismiss
+  const hangUp = async () => {
+    setCallState('ended');
+    
+    if (ringingTimeoutRef.current) {
+      clearTimeout(ringingTimeoutRef.current);
+    }
+    
+    if (incomingCall || (callState === 'connected' && selectedUserId)) {
+      const peerId = incomingCall ? incomingCall.callerId : selectedUserId;
+      const roomName = incomingCall ? incomingCall.roomName : `call-test-${Date.now()}`;
+      
+      if (peerId) {
+        try {
+          await fetch('/api/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              toUserId: peerId,
+              type: 'call_ended',
+              roomName,
+            }),
+          });
+        } catch (err) {
+          console.error('Failed to send hangup notification', err);
+        }
+      }
+    }
+    
+    toast('CallCheck ended', { icon: '✅' });
   };
 
-  const handleDecline = () => {
-    setIncomingCall(null);
-    toast('CallCheck declined', { icon: '📞' });
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  };
+
+  const callCardStyle: React.CSSProperties = {
+    backgroundColor: '#1e293b',
+    borderRadius: '24px',
+    padding: '32px',
+    width: '90%',
+    maxWidth: '400px',
+    textAlign: 'center',
+    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
+    position: 'relative',
+  };
+
+  const avatarStyle: React.CSSProperties = {
+    width: '96px',
+    height: '96px',
+    borderRadius: '50%',
+    backgroundColor: '#334155',
+    margin: '0 auto 24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '36px',
+    fontWeight: 'bold',
+    color: '#cbd5e1',
+    border: '4px solid #4f46e5',
+  };
+
+  const nameStyle: React.CSSProperties = {
+    fontSize: '28px',
+    fontWeight: 'bold',
+    color: '#f1f5f9',
+    marginBottom: '8px',
+  };
+
+  const statusStyle: React.CSSProperties = {
+    fontSize: '18px',
+    color: '#94a3b8',
+    marginBottom: '24px',
+    textTransform: 'capitalize',
+  };
+
+  const timerStyle: React.CSSProperties = {
+    fontSize: '48px',
+    fontWeight: 'bold',
+    color: '#f1f5f9',
+    margin: '16px 0 32px',
+    fontFamily: 'monospace',
+  };
+
+  const buttonContainerStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '24px',
+    marginTop: '16px',
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    width: '72px',
+    height: '72px',
+    borderRadius: '50%',
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'transform 0.1s, box-shadow 0.1s',
+  };
+
+  const hangUpButtonStyle: React.CSSProperties = {
+    ...buttonStyle,
+    backgroundColor: '#ef4444',
+    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.4)',
+  };
+
+  const acceptButtonStyle: React.CSSProperties = {
+    ...buttonStyle,
+    backgroundColor: '#22c55e',
+    boxShadow: '0 4px 12px rgba(34, 197, 94, 0.4)',
+  };
+
+  const declineButtonStyle: React.CSSProperties = {
+    ...buttonStyle,
+    backgroundColor: '#64748b',
+    boxShadow: '0 4px 12px rgba(100, 116, 139, 0.4)',
+  };
+
+  const iconStyle: React.CSSProperties = {
+    width: '32px',
+    height: '32px',
+    strokeWidth: '1.5',
   };
 
   if (!currentUser) {
-    return <div className="p-8">Loading...</div>;
+    return <div style={{ padding: '32px' }}>Loading...</div>;
   }
 
   if (!currentUserProfile) {
-    return <div className="p-8">Loading your profile...</div>;
+    return <div style={{ padding: '32px' }}>Loading your profile...</div>;
   }
 
   return (
-    <div className="max-w-md mx-auto p-6 space-y-6 relative">
-      <h1 className="text-2xl font-bold text-stone-800">CallCheck Test</h1>
-      <p className="text-stone-600">
-        Select a user to call. They will receive a real-time notification **on this page**.
+    <div style={{ maxWidth: '480px', margin: '0 auto', padding: '24px', position: 'relative' }}>
+      <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>CallCheck Test</h1>
+      <p style={{ color: '#475569', lineHeight: 1.5, marginBottom: '32px' }}>
+        Select a user to call. They will receive a real-time notification <strong>on this page</strong>.
       </p>
 
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-stone-700">Select User to Call</label>
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#334155', marginBottom: '8px' }}>
+          Select User to Call
+        </label>
         <select
           value={selectedUserId}
           onChange={(e) => setSelectedUserId(e.target.value)}
-          className="w-full p-3 border border-stone-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          style={{
+            width: '100%',
+            padding: '14px',
+            border: '1px solid #cbd5e1',
+            borderRadius: '12px',
+            fontSize: '16px',
+            backgroundColor: '#f8fafc',
+            color: '#1e293b',
+            outline: 'none',
+            transition: 'border-color 0.2s',
+          }}
+          onFocus={(e) => e.currentTarget.style.borderColor = '#4f46e5'}
+          onBlur={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
         >
           <option value="">— Choose a user —</option>
           {users.map((user) => (
-            <option key={user.id} value={user.id}>
+            <option key={user.id} value={user.id} style={{ padding: '8px' }}>
               {user.full_name || 'Unnamed User'}
             </option>
           ))}
@@ -136,30 +430,146 @@ export default function TestCallPage() {
 
       <button
         onClick={handleCall}
-        disabled={!selectedUserId}
-        className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-stone-300 disabled:cursor-not-allowed transition"
+        disabled={!selectedUserId || callState !== 'idle'}
+        style={{
+          width: '100%',
+          padding: '16px',
+          backgroundColor: selectedUserId && callState === 'idle' ? '#4f46e5' : '#94a8c4',
+          color: 'white',
+          fontWeight: '600',
+          fontSize: '18px',
+          borderRadius: '16px',
+          border: 'none',
+          cursor: selectedUserId && callState === 'idle' ? 'pointer' : 'not-allowed',
+          transition: 'background-color 0.2s',
+        }}
+        onMouseOver={(e) => {
+          if (selectedUserId && callState === 'idle') {
+            e.currentTarget.style.backgroundColor = '#4338ca';
+          }
+        }}
+        onMouseOut={(e) => {
+          if (selectedUserId && callState === 'idle') {
+            e.currentTarget.style.backgroundColor = '#4f46e5';
+          }
+        }}
       >
-        CallCheck Them!
+        {callState === 'idle' ? 'CallCheck Them!' : 'CallCheck in Progress...'}
       </button>
 
-      {/* ✅ Incoming Call Popup — rendered directly on this page */}
-      {incomingCall && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-sm mx-4 shadow-2xl">
-            <h3 className="font-bold text-lg">Incoming {incomingCall.callType} Call</h3>
-            <p className="text-gray-600 mt-2">From: {incomingCall.fromUserName}</p>
-            <div className="flex gap-3 mt-4">
+      {/* Incoming Call Popup */}
+      {incomingCall && callState === 'idle' && (
+        <div style={overlayStyle}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '20px',
+            padding: '28px',
+            width: '90%',
+            maxWidth: '400px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
+          }}>
+            <h3 style={{ fontSize: '22px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>
+              Incoming {incomingCall.callType} Call
+            </h3>
+            <p style={{ color: '#475569', marginBottom: '24px' }}>From: {incomingCall.callerName}</p>
+            <div style={{ display: 'flex', gap: '16px' }}>
               <button
                 onClick={handleAccept}
-                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700"
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  backgroundColor: '#22c55e',
+                  color: 'white',
+                  borderRadius: '16px',
+                  border: 'none',
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#22c55e'}
               >
                 Accept
               </button>
               <button
                 onClick={handleDecline}
-                className="flex-1 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400"
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  backgroundColor: '#64748b',
+                  color: 'white',
+                  borderRadius: '16px',
+                  border: 'none',
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#475a6d'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#64748b'}
               >
                 Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Calling Overlay */}
+      {(callState === 'calling' || callState === 'ringing' || callState === 'connected') && (
+        <div style={overlayStyle}>
+          <div style={callCardStyle}>
+            <div style={avatarStyle}>
+              {(calleeName || 'U').charAt(0).toUpperCase()}
+            </div>
+            
+            <div style={nameStyle}>{calleeName}</div>
+            
+            <div style={statusStyle}>
+              {callState === 'calling' && 'Calling...'}
+              {callState === 'ringing' && 'Ringing...'}
+              {callState === 'connected' && 'Connected'}
+            </div>
+            
+            {callState === 'connected' && (
+              <div style={timerStyle}>
+                {formatTime(callTimer)}
+              </div>
+            )}
+            
+            <div style={buttonContainerStyle}>
+              {callState === 'ringing' && (
+                <>
+                  <button 
+                    onClick={() => setCallState('ended')} 
+                    style={declineButtonStyle}
+                    title="Simulate Decline"
+                  >
+                    <svg style={iconStyle} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M15 9L9 15M9 9l6 6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <button 
+                    onClick={() => setCallState('connected')} 
+                    style={acceptButtonStyle}
+                    title="Simulate Accept"
+                  >
+                    <svg style={iconStyle} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M5 13l4 4L19 7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </>
+              )}
+              
+              <button 
+                onClick={hangUp} 
+                style={hangUpButtonStyle}
+                title="Hang Up"
+              >
+                <svg style={iconStyle} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M15.75 9a4.5 4.5 0 00-4.5-4.5 4.5 4.5 0 00-4.5 4.5 4.5 4.5 0 004.5 4.5M8.25 10.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM19.5 9a4.5 4.5 0 00-4.5-4.5 4.5 4.5 0 00-4.5 4.5 4.5 4.5 0 004.5 4.5M16.5 10.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
               </button>
             </div>
           </div>

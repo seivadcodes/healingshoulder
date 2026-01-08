@@ -146,19 +146,22 @@ const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const supabase = useMemo(() => createClient(), []);
 
   const {
-  isInCall,
-  setIsInCall,
+  callState,
+  setCallState,
   callType,
   setCallType,
   callRoom,
   setCallRoom,
-  setRemoteVideoTrack,
-  setLocalVideoTrack,
+  remoteAudioTrack,
+  setRemoteAudioTrack,
+  localAudioTrack,
   setLocalAudioTrack,
+  isMuted,
   setIsMuted,
+  isCameraOff,
   setIsCameraOff,
+  hangUp,
 } = useCall();
-
   
 
 
@@ -856,7 +859,6 @@ const trackActivity = useCallback(() => {
     setShowEmojiPicker(false);
     messageInputRef.current?.focus();
   };
-
 const handleCallUser = async () => {
   if (!selectedConversation || !currentUserId) {
     toast.error('Unable to start call: missing conversation or user');
@@ -869,22 +871,13 @@ const handleCallUser = async () => {
   
   // Generate a unique room name
   const roomName = `call-${selectedConversation.id}-${Date.now()}`;
-  const callType = 'video'; // Default to video, could be made configurable
   
   try {
-    // Join the call room first
-    const { room, localAudioTrack, localVideoTrack } = await joinCallRoom(roomName, callType);
+    // Set UI state to "calling" immediately
+    setCallState('calling');
+    setCallType('audio');
     
-    // Update call state
-    setIsInCall(true);
-    setCallRoom(room);
-    setCallType(callType);
-    setLocalAudioTrack(localAudioTrack);
-    setLocalVideoTrack(localVideoTrack);
-    setIsMuted(false);
-    setIsCameraOff(callType === 'video' ? false : true);
-    
-    // Notify the other user
+    // First, notify the other user
     const notifyRes = await fetch('/api/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -893,44 +886,54 @@ const handleCallUser = async () => {
         fromUserId: currentUserId,
         fromUserName,
         roomName,
-        callType,
+        callType: 'audio',
         conversationId: selectedConversation.id,
       }),
     });
     
     if (!notifyRes.ok) {
-      const errorData = await notifyRes.json().catch(() => null);
-      console.warn('CallCheck: Notification sent but recipient may not be available', errorData);
-      // Don't disconnect immediately - give them a chance to join
+      console.warn('CallCheck: Notification sent but recipient may not be available');
       toast.success(`Calling ${selectedConversation.other_user_full_name}... (they might be offline)`);
-    } else {
-      toast.success(`Calling ${selectedConversation.other_user_full_name}...`);
     }
     
-    console.log('CallCheck: Call initiated successfully');
+    // Set state to ringing after notification is sent
+    setCallState('ringing');
+    toast.success(`Calling ${selectedConversation.other_user_full_name}...`);
+    
+    // Now join the room
+    const { room, localAudioTrack } = await joinCallRoom(roomName);
+    
+    // Update call state and tracks
+    setCallRoom(room);
+    setLocalAudioTrack(localAudioTrack);
+    
+    // Subscribe to remote tracks
+    room.on('trackSubscribed', (track: RemoteTrack) => {
+      console.log('📥 Subscribed to remote track:', track.kind);
+      if (track.kind === 'audio') {
+        setRemoteAudioTrack(track);
+      }
+    });
+    
+    // After 30 seconds, automatically hang up if not connected
+    const timeoutId = setTimeout(() => {
+      if (callState === 'calling' || callState === 'ringing') {
+        toast.error('Call not answered');
+        hangUp();
+      }
+    }, 30000);
+    
+    // Don't clean up the timeout here - it should persist
+    // Instead, handle cleanup in a useEffect or in hangUp
   } catch (err) {
     console.error('CallCheck failed:', err);
-    
-    let message = 'Failed to start call';
-    if (err instanceof Error) {
-      message = err.message;
-    } else if (typeof err === 'string') {
-      message = err;
-    }
-    
-    toast.error(message);
-    
-    // Clean up on error
-    setIsInCall(false);
-    if (callRoom) {
-      callRoom.disconnect();
-      setCallRoom(null);
-    }
-    setLocalAudioTrack(null);
-    setLocalVideoTrack(null);
+    toast.error('Failed to start call');
+    setCallState('ended');
+    setTimeout(() => {
+      setCallState('idle');
+    }, 1000);
   }
 };
-
   const scrollToMessage = (messageId: string) => {
     const messageElement = messageRefs.current.get(messageId);
     if (messageElement) {

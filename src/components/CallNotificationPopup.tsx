@@ -5,30 +5,44 @@ import { useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Room, RemoteTrack, LocalTrack } from 'livekit-client';
 import toast from 'react-hot-toast';
-import type { Track, TrackPublication } from 'livekit-client';
 
 export default function CallNotificationPopup() {
   const {
     incomingCall,
     setIncomingCall,
-    setIsInCall,
+    callState,
+    setCallState,
     setCallType,
     setCallRoom,
     setLocalAudioTrack,
     setLocalVideoTrack,
-    setRemoteVideoTrack,
+    setRemoteAudioTrack,
     setIsMuted,
     setIsCameraOff,
+    startCallTimer,
+    rejectCall: contextRejectCall,
   } = useCall();
 
   const autoDeclineTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Define rejectCall BEFORE useEffect that uses it
+  const rejectCall = () => {
+    // Use the context's rejectCall function
+    contextRejectCall();
+    
+    // Clear the auto-decline timer
+    if (autoDeclineTimerRef.current) {
+      clearTimeout(autoDeclineTimerRef.current);
+      autoDeclineTimerRef.current = null;
+    }
+  };
 
   // Auto-decline after 30s
   useEffect(() => {
     if (incomingCall) {
       if (autoDeclineTimerRef.current) clearTimeout(autoDeclineTimerRef.current);
       autoDeclineTimerRef.current = setTimeout(() => {
-        setIncomingCall(null);
+        rejectCall();
         autoDeclineTimerRef.current = null;
       }, 30_000);
     } else {
@@ -43,7 +57,7 @@ export default function CallNotificationPopup() {
         autoDeclineTimerRef.current = null;
       }
     };
-  }, [incomingCall, setIncomingCall]);
+  }, [incomingCall, rejectCall]);
 
   const acceptCall = async () => {
     if (!incomingCall || !incomingCall.roomName) {
@@ -62,14 +76,20 @@ export default function CallNotificationPopup() {
     const userName = session.user.user_metadata?.full_name || session.user.email || 'Anonymous';
 
     try {
-      setIsInCall(true);
+      // Set call state to connected
       setCallType(incomingCall.callType);
-      setIncomingCall(null);
+      setCallState('connected');
+      
+      // Clear the auto-decline timer
       if (autoDeclineTimerRef.current) {
         clearTimeout(autoDeclineTimerRef.current);
         autoDeclineTimerRef.current = null;
       }
 
+      // Set incoming call to null after accepting
+      setIncomingCall(null);
+
+      // Get token and connect to room
       const tokenRes = await fetch('/api/livekit/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,13 +112,8 @@ export default function CallNotificationPopup() {
       // Subscribe to track events
       room.on('trackSubscribed', (track: RemoteTrack) => {
         console.log('📥 Subscribed to remote track:', track.kind);
-        setRemoteVideoTrack(track);
-      });
-
-      room.on('trackUnsubscribed', (track: RemoteTrack) => {
-        console.log('📤 Unsubscribed from track:', track.kind);
-        if (track.kind === 'video' || track.kind === 'audio') {
-          setRemoteVideoTrack(null);
+        if (track.kind === 'audio') {
+          setRemoteAudioTrack(track);
         }
       });
 
@@ -108,7 +123,6 @@ export default function CallNotificationPopup() {
 
       // Publish local tracks
       let audioTrack: LocalTrack | null = null;
-      let videoTrack: LocalTrack | null = null;
 
       // Publish audio track
       try {
@@ -122,8 +136,9 @@ export default function CallNotificationPopup() {
         console.warn('Audio track creation failed:', e);
       }
 
-      // Publish video track if video call
+      // For video calls, handle video tracks
       if (incomingCall.callType === 'video') {
+        let videoTrack: LocalTrack | null = null;
         try {
           const tracks = await room.localParticipant.createTracks({ video: true });
           if (tracks[0]) {
@@ -136,28 +151,18 @@ export default function CallNotificationPopup() {
         }
       }
 
-      // Set initial UI states
-      setIsMuted(false); // Default to unmuted
-      setIsCameraOff(incomingCall.callType === 'video' ? false : true);
+      // Start the call timer
+      startCallTimer();
       
     } catch (err) {
       console.error('CallCheck accept error:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to join call');
-      setIsInCall(false);
-      setCallRoom(null);
-      setIncomingCall(null);
+      setCallState('ended');
+      setTimeout(() => setCallState('idle'), 1000);
     }
   };
 
-  const declineCall = () => {
-    setIncomingCall(null);
-    if (autoDeclineTimerRef.current) {
-      clearTimeout(autoDeclineTimerRef.current);
-      autoDeclineTimerRef.current = null;
-    }
-  };
-
-  if (!incomingCall) return null;
+  if (!incomingCall || callState !== 'idle') return null;
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-end md:items-center justify-center p-4">
@@ -174,7 +179,7 @@ export default function CallNotificationPopup() {
             Accept
           </button>
           <button
-            onClick={declineCall}
+            onClick={rejectCall}
             className="flex-1 bg-gray-500 text-white py-2 rounded-full font-medium hover:bg-gray-600 transition"
           >
             Decline
