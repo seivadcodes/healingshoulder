@@ -12,6 +12,7 @@ import { Room, RoomEvent, LocalTrack, RemoteTrack, RemoteParticipant } from 'liv
 
 import { joinCallRoom } from '@/lib/livekit';
 import { useCall } from '@/context/CallContext';
+import { consumePendingConversation } from '@/lib/conversationHandoff';
 type User = {
   id: string;
   full_name: string;
@@ -356,6 +357,13 @@ useEffect(() => {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  useEffect(() => {
+  const userId = consumePendingConversation();
+  if (userId && currentUserId) {
+    handleStartNewConversation(userId);
+  }
+}, [currentUserId]); 
 
 
 

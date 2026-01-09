@@ -22,6 +22,7 @@ import type {
 } from './useDashboardLogic';
 
 import Image from 'next/image';
+import Link from 'next/link';
 
 const griefTypeLabels: Record<GriefType, string> = {
   parent: 'Loss of a Parent',
@@ -758,10 +759,10 @@ const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   );
 };
 
-const ProfileContextSection = ({ 
-  profile, 
-  setShowSettings, 
-  setShowGriefSetup 
+const ProfileContextSection = ({
+  profile,
+  setShowSettings,
+  setShowGriefSetup
 }: {
   profile: UserProfile | null;
   setShowSettings: (show: boolean) => void;
@@ -769,7 +770,6 @@ const ProfileContextSection = ({
 }) => {
   const displayName = profile?.fullName || (profile?.email ? profile.email.split('@')[0] : 'Friend');
   const firstName = displayName.split(' ')[0];
-
   return (
     <div style={{
       ...baseStyles.card,
@@ -798,7 +798,6 @@ const ProfileContextSection = ({
           <Settings size={20} />
         </button>
       </div>
-      
       <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '0.5rem', marginBottom: '1rem' }}>
         {profile?.griefTypes?.map((type) => (
           <span
@@ -820,7 +819,23 @@ const ProfileContextSection = ({
           </span>
         ))}
       </div>
-      
+
+      {/* 👇 Insert the View Public Profile link here */}
+      {profile?.id && (
+        <Link
+          href={`/profile/${profile.id}`}
+          style={{
+            fontSize: '0.75rem',
+            color: '#b45309',
+            textDecoration: 'none',
+            display: 'inline-block',
+            marginBottom: '0.5rem',
+          }}
+        >
+          👤 View Public Profile
+        </Link>
+      )}
+
       <button
         onClick={() => setShowGriefSetup(true)}
         style={{
@@ -840,7 +855,6 @@ const ProfileContextSection = ({
     </div>
   );
 };
-
 const CommunityPresence = ({ onlineCount }: { onlineCount: number }) => (
   <div style={{ textAlign: 'center' as const }}>
     <p style={{ color: '#44403c', fontWeight: 500 }}>Your grief is seen here</p>
