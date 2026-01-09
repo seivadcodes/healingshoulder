@@ -850,16 +850,21 @@ const handleCallUser = async () => {
     return;
   }
   
-  const roomName = `call_${selectedConversation.id}_${Date.now()}`;
+  const roomName = selectedConversation.id; // Use conversation ID as room name
   const otherUserName = selectedConversation.other_user_full_name || 'User';
+  const otherUserAvatar = selectedConversation.other_user_avatar_url || null;
   
-  // Start the call
+  // Start the call with all required parameters
   await startCall(
     selectedConversation.other_user_id, 
     otherUserName, 
     'audio', 
-    roomName
+    roomName,
+    selectedConversation.id,
+    otherUserAvatar
   );
+  
+  toast.success(`Calling ${otherUserName}...`);
 };
   const scrollToMessage = (messageId: string) => {
     const messageElement = messageRefs.current.get(messageId);
