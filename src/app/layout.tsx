@@ -6,7 +6,7 @@ import './globals.css';
 import Header from '@/components/layout/header';
 import FooterNav from '@/components/layout/FooterNav';
 import { SupabaseProvider } from '@/components/SupabaseProvider';
-import { SignalingProvider } from '@/components/SignalingProvider';
+
 import { useAuth } from '@/hooks/useAuth';
 import { ReactNode, Suspense } from 'react';
 import { Toaster } from 'react-hot-toast';
