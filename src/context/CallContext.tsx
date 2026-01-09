@@ -5,6 +5,7 @@ import type { RemoteTrack, LocalTrack } from 'livekit-client';
 // Add these imports at the top of the file
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
+import type { LocalAudioTrack } from 'livekit-client';
 
 type CallState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended';
 
@@ -24,7 +25,7 @@ type CallContextType = {
   callType: 'audio' | 'video';
   setCallType: (type: 'audio' | 'video') => void;
 
-  // 👇 Add this line
+  // 👇 Add this 
   calleeName: string | null;
   setCalleeName: (name: string | null) => void;
   
@@ -98,7 +99,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, 1000);
     setTimerInterval(interval);
   };
+useEffect(() => {
+  if (localAudioTrack) {
+    // Type assertion with a more specific, known type
+    const audioTrack = localAudioTrack as LocalAudioTrack;
+    const mediaStreamTrack = audioTrack.mediaStreamTrack;
 
+    if (mediaStreamTrack && 'enabled' in mediaStreamTrack) {
+      mediaStreamTrack.enabled = !isMuted;
+    }
+  }
+}, [isMuted, localAudioTrack]);
   // Reset the timer
   const resetCallTimer = () => {
     if (timerInterval) {
@@ -167,6 +178,17 @@ useEffect(() => {
     // Connect to room
     await room.connect(process.env.NEXT_PUBLIC_LIVEKIT_URL!, token);
     console.log('CallCheck: Callee joined room successfully');
+
+    // ✅ NOTIFY CALLER THAT THE CALL WAS ACCEPTED
+    await fetch('/api/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'call_accepted',
+        toUserId: incomingCall.callerId,      // ← send to caller
+        roomName: incomingCall.roomName,
+      }),
+    });
 
     // Publish local audio track
     let audioTrack: LocalTrack | null = null;

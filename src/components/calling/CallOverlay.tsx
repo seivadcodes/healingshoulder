@@ -1,4 +1,3 @@
-// src/components/calling/CallOverlay.tsx
 'use client';
 
 import { useEffect, useRef } from 'react';
@@ -47,6 +46,7 @@ export default function CallOverlay() {
     callType,
     incomingCall,
     remoteVideoTrack,
+    remoteAudioTrack, // 👈 make sure this is in your context!
     localVideoTrack,
     isMuted,
     calleeName,
@@ -62,14 +62,30 @@ export default function CallOverlay() {
   const isCallActive = callState === 'connected';
 
   // Determine the name to display
- const displayName = incomingCall
-  ? incomingCall.callerName
-  : calleeName || 'Calling…';
+  const displayName = incomingCall
+    ? incomingCall.callerName
+    : calleeName || 'Calling…';
 
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null); // 👈 new ref for audio
 
-  // Attach remote video
+  // 🔊 Attach remote AUDIO track
+  useEffect(() => {
+    if (remoteAudioTrack && callState === 'connected' && remoteAudioRef.current) {
+      const audioEl = remoteAudioRef.current;
+      remoteAudioTrack.attach(audioEl);
+
+      // Attempt to play (user interaction already happened via call button)
+      audioEl.play().catch(e => console.warn('Remote audio play failed:', e));
+
+      return () => {
+        remoteAudioTrack.detach();
+      };
+    }
+  }, [remoteAudioTrack, callState]);
+
+  // 📹 Attach remote VIDEO track
   useEffect(() => {
     if (remoteVideoTrack && remoteVideoRef.current) {
       remoteVideoTrack.attach(remoteVideoRef.current);
@@ -79,7 +95,7 @@ export default function CallOverlay() {
     }
   }, [remoteVideoTrack]);
 
-  // Attach local video
+  // 📷 Attach local VIDEO track
   useEffect(() => {
     if (localVideoTrack && !isCameraOff && localVideoRef.current) {
       localVideoTrack.attach(localVideoRef.current);
@@ -167,6 +183,14 @@ export default function CallOverlay() {
         justifyContent: 'center',
         padding: '16px'
       }}>
+        {/* 🔇 Hidden audio element for remote participant */}
+        <audio
+          ref={remoteAudioRef}
+          autoPlay
+          playsInline
+          style={{ display: 'none' }}
+        />
+
         {/* Main area */}
         <div style={{
           position: 'relative',

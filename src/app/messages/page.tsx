@@ -8,7 +8,8 @@ import Picker from '@emoji-mart/react';
 import data from '@emoji-mart/data';
 import { toast } from 'react-hot-toast';
 import CallOverlay from '@/components/calling/CallOverlay';
-import { Room, RoomEvent, LocalTrack, RemoteTrack } from 'livekit-client';
+import { Room, RoomEvent, LocalTrack, RemoteTrack, RemoteParticipant } from 'livekit-client';
+
 import { joinCallRoom } from '@/lib/livekit';
 import { useCall } from '@/context/CallContext';
 type User = {
@@ -394,37 +395,40 @@ useEffect(() => {
   };
 
   ws.onmessage = (event) => {
-    console.log('CallCheck: Raw message received:', event.data); // 🔍 Critical for debugging
-    try {
-      const msg = JSON.parse(event.data);
-      console.log('CallCheck: Parsed message:', msg);
+  console.log('CallCheck: Raw message received:', event.data); // 🔍 Critical for debugging
+  try {
+    const msg = JSON.parse(event.data);
+    console.log('CallCheck: Parsed message:', msg);
 
-      if (msg.type === 'incoming_call') {
-        // Validate required fields
-        if (!msg.roomName || !msg.callerId || !msg.callerName || !msg.callType) {
-          console.warn('CallCheck: Incoming call missing required fields:', msg);
-          return;
-        }
-
-        setIncomingCall({
-          roomName: msg.roomName,
-          callerId: msg.callerId,
-          callerName: msg.callerName,
-          callType: msg.callType,
-          conversationId: msg.conversationId,
-        });
-        setCallState('idle'); // Ensure popup shows
-        console.log('CallCheck: Popup triggered for incoming call');
-      } else if (msg.type === 'call_ended') {
-        console.log('CallCheck: Received call_ended signal');
-        hangUp();
-      } else {
-        console.warn('CallCheck: Unknown message type:', msg.type, msg);
+    if (msg.type === 'incoming_call') {
+      // Validate required fields
+      if (!msg.roomName || !msg.callerId || !msg.callerName || !msg.callType) {
+        console.warn('CallCheck: Incoming call missing required fields:', msg);
+        return;
       }
-    } catch (e) {
-      console.error('CallCheck: Failed to parse WebSocket message:', e, event.data);
+
+      setIncomingCall({
+        roomName: msg.roomName,
+        callerId: msg.callerId,
+        callerName: msg.callerName,
+        callType: msg.callType,
+        conversationId: msg.conversationId,
+      });
+      setCallState('idle'); // Ensure popup shows
+      console.log('CallCheck: Popup triggered for incoming call');
+    } else if (msg.type === 'call_ended') {
+      console.log('CallCheck: Received call_ended signal');
+      hangUp();
+    } else if (msg.type === 'call_accepted') {
+      console.log('CallCheck: Call accepted by remote participant');
+      setCallState('connected');
+    } else {
+      console.warn('CallCheck: Unknown message type:', msg.type, msg);
     }
-  };
+  } catch (e) {
+    console.error('CallCheck: Failed to parse WebSocket message:', e, event.data);
+  }
+};
 
   ws.onerror = (err) => {
     console.error('CallCheck: WebSocket error:', err);
@@ -448,6 +452,31 @@ useEffect(() => {
     ws.close();
   };
 }, [currentUserId, setIncomingCall, setCallState, hangUp]);
+
+
+// 🔁 Sync call state with LiveKit participant presence
+useEffect(() => {
+  if (!callRoom || !currentUserId) return;
+
+  const handleParticipantConnected = (participant: RemoteParticipant) => {
+    // Only react to remote participants (not self)
+    if (participant.identity !== currentUserId) {
+      console.log('CallCheck: Remote participant joined — call answered!');
+      setCallState('connected'); // ✅ Transition to connected state
+      // Optional: remove listener after first join (for 1:1 calls)
+      callRoom.off('participantConnected', handleParticipantConnected);
+    }
+  };
+
+  // Only listen if we're in ringing/calling state
+  if (callState === 'calling' || callState === 'ringing') {
+    callRoom.on('participantConnected', handleParticipantConnected);
+  }
+
+  return () => {
+    callRoom.off('participantConnected', handleParticipantConnected);
+  };
+}, [callRoom, currentUserId, callState]);
 
 
   // Handle long press for reactions (only on others' messages)
@@ -986,12 +1015,16 @@ setCalleeName(selectedConversation.other_user_full_name);
     setLocalAudioTrack(localAudioTrack);
     
     // Subscribe to remote tracks
-    room.on('trackSubscribed', (track: RemoteTrack) => {
-      console.log('📥 Subscribed to remote track:', track.kind);
-      if (track.kind === 'audio') {
-        setRemoteAudioTrack(track);
-      }
-    });
+  room.on('trackSubscribed', (track: RemoteTrack) => {
+  console.log('📥 Subscribed to remote track:', track.kind);
+  if (track.kind === 'audio') {
+    setRemoteAudioTrack(track);
+    // Also transition to connected state if still in ringing/calling
+    if (callState === 'calling' || callState === 'ringing') {
+      setCallState('connected');
+    }
+  }
+});
     
     // After 30 seconds, automatically hang up if not connected
     const timeoutId = setTimeout(() => {
