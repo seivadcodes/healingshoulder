@@ -1,231 +1,300 @@
-// src/app/page.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { createSession } from '@/lib/matching';
 
-// Mock live activity feed
-const mockLiveActivities = [
-  { id: 1, type: 'chat', message: 'Live Now: 3 people in “Grief Support Chat” — join anonymously.', action: 'Join' },
-  { id: 2, type: 'call', message: 'Someone just asked for a group call about “Coping with Holidays” — you can join.', action: 'Join Call' },
-  { id: 3, type: 'community', message: 'New member joined “Friends Who Understand” community.', action: 'See Post' },
-  { id: 4, type: 'event', message: 'Upcoming: “Mindfulness for Grief” workshop in 2 hours — reserve your spot.', action: 'Remind Me' },
-  { id: 5, type: 'game', message: 'Game Live: “Memory Garden” — 5 players building a digital memorial together. Join?', action: 'Play' },
-  { id: 6, type: 'post', message: 'Someone posted in “Loss of a Parent”: “I miss his laugh today.” — reply with a heart or share your story.', action: 'Respond' },
-];
+export default function WebSocketTestPage() {
+  const [userId, setUserId] = useState('');
+  const [targetUserId, setTargetUserId] = useState('');
+  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState<Array<{ id: string; text: string; sender: string; type: 'incoming' | 'outgoing' | 'system' }>>([]);
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-export default function HomePage() {
-  const router = useRouter();
-  const [onlineCount, setOnlineCount] = useState(42);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const heartbeatRef = useRef<HTMLDivElement>(null);
-
-  // Simulate online count fluctuation
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
-    const interval = setInterval(() => {
-      setOnlineCount((prev) => {
-        const fluctuation = Math.floor(Math.random() * 6) - 2;
-        return Math.max(10, prev + fluctuation);
-      });
-    }, 8000);
-    return () => clearInterval(interval);
-  }, []);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  // Manual heartbeat animation via JS (since inline styles can't do keyframes easily)
- useEffect(() => {
-  const startPulse = () => {
-    if (!heartbeatRef.current) return;
-    heartbeatRef.current.style.opacity = '0.9';
-    setTimeout(() => {
-      if (heartbeatRef.current) {
-        heartbeatRef.current.style.opacity = '1';
+  const addMessage = (text: string, sender: string, type: 'incoming' | 'outgoing' | 'system') => {
+    setMessages(prev => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        text,
+        sender,
+        type
       }
-    }, 500);
+    ]);
   };
 
-  const pulseInterval = setInterval(startPulse, 4000);
-  const pingInterval = setInterval(() => {
-    // Simulate ping glow by briefly changing box-shadow (optional)
-  }, 2000);
-
-  return () => {
-    clearInterval(pulseInterval);
-    clearInterval(pingInterval);
+  const addSystemMessage = (text: string) => {
+    addMessage(text, 'system', 'system');
   };
-}, []);
-  const handleQuickConnect = async () => {
-    if (isConnecting) return;
-    setIsConnecting(true);
+
+  const connectWebSocket = () => {
+    if (!userId.trim()) {
+      setError('Please enter a User ID');
+      return;
+    }
+
+    // Close existing connection if any
+    if (ws) {
+      ws.close();
+    }
+
     try {
-      const session = await createSession();
-      router.push(`/call/${session.id}`);
-    } catch (error) {
-      console.error('Connection failed:', error);
-      alert('Unable to connect right now. Please try again.');
-      setIsConnecting(false);
+      const socket = new WebSocket(`ws://178.128.210.229:8085?userId=${userId.trim()}`);
+      
+      socket.onopen = () => {
+        console.log('WebSocket connected');
+        setIsConnected(true);
+        setError(null);
+        addSystemMessage(`✅ Connected as ${userId.trim()}`);
+        setWs(socket);
+      };
+      
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Received message:', data);
+          
+          // Handle chat messages
+          if (data.type === 'chat' && data.payload?.message) {
+            addMessage(data.payload.message, data.payload.fromUserId || 'unknown', 'incoming');
+          } 
+          // Handle any other message types
+          else {
+            addSystemMessage(`📥 Received: ${JSON.stringify(data)}`);
+          }
+        } catch (err) {
+          console.error('Error parsing message:', err);
+          addSystemMessage(`⚠️ Raw message: ${event.data}`);
+        }
+      };
+      
+      socket.onclose = (event) => {
+        console.log('WebSocket closed:', event.reason);
+        setIsConnected(false);
+        setWs(null);
+        if (event.code !== 1000) { // 1000 = normal closure
+          setError('Connection lost. Reconnecting...');
+          addSystemMessage('❌ Disconnected from server. Attempting to reconnect...');
+          setTimeout(() => {
+            connectWebSocket();
+          }, 3000);
+        }
+      };
+      
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setError('WebSocket connection error');
+      };
+      
+    } catch (err) {
+      console.error('Connection error:', err);
+      setError('Failed to connect to WebSocket server');
     }
   };
 
-  const handleFindTribe = () => {
-    router.push('/communities');
+  const sendMessage = async () => {
+    if (!message.trim() || !targetUserId.trim()) {
+      setError('Please enter both a message and target User ID');
+      return;
+    }
+
+    if (!isConnected || !ws) {
+      setError('Not connected to WebSocket server. Click "Connect" first.');
+      return;
+    }
+
+    // Add to UI immediately (optimistic update)
+    addMessage(message.trim(), userId || 'me', 'outgoing');
+    const currentMessage = message.trim();
+    setMessage('');
+
+    try {
+      const response = await fetch('http://178.128.210.229:8086', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          toUserId: targetUserId.trim(),
+          type: 'chat',
+          payload: {
+            message: currentMessage,
+            fromUserId: userId.trim(),
+            timestamp: new Date().toISOString()
+          }
+        }),
+      });
+
+      const result = await response.json();
+      console.log('Message sent result:', result);
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to send message');
+      }
+
+      if (!result.delivered) {
+        addSystemMessage(`ⓘ Message sent but user ${targetUserId.trim()} may be offline`);
+      }
+    } catch (err) {
+      console.error('Error sending message:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send message');
+      // Don't revert the optimistic update since it might still be delivered
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-        background: 'linear-gradient(to bottom, #fffbeb, #f5f5f4, #f4f4f5)',
-        padding: '1rem',
-      }}
-    >
-      {/* Main Heartbeat Circle */}
-      <div
-        ref={heartbeatRef}
-        style={{
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '16rem',
-          height: '16rem',
-          borderRadius: '9999px',
-          background: 'linear-gradient(135deg, #fef3c7, #e5e5e4)',
-          border: '1px solid #d6d3d1',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.08)',
-          margin: '3rem 0',
-          transition: 'all 1s ease',
-          opacity: 1,
-        }}
-      >
-        <div style={{ textAlign: 'center', padding: '0 1rem', zIndex: 1 }}>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: '500', color: '#1c1917', marginBottom: '0.5rem' }}>
-            Someone is here with you.
-          </h1>
-          <p style={{ color: '#44403c', fontSize: '1.125rem' }}>Right now.</p>
-        </div>
-        {/* Optional: add subtle glow via box-shadow animation if needed — but inline can't animate easily */}
-      </div>
-
-      {/* Primary Action Buttons */}
-      <div style={{ width: '100%', maxWidth: '32rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2.5rem' }}>
-        <button
-          onClick={handleQuickConnect}
-          disabled={isConnecting}
-          style={{
-            width: '100%',
-            padding: '1rem',
-            backgroundColor: isConnecting ? '#fbbf24' : '#f59e0b',
-            color: isConnecting ? '#fef3c7' : 'white',
-            fontWeight: '600',
-            borderRadius: '0.75rem',
-            border: 'none',
-            cursor: isConnecting ? 'not-allowed' : 'pointer',
-            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-            transition: 'transform 0.2s, background-color 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(1.02)';
-          }}
-          onMouseLeave={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(1)';
-          }}
-          onTouchStart={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(0.98)';
-          }}
-          onTouchEnd={(e) => {
-            if (!isConnecting) e.currentTarget.style.transform = 'scale(1)';
-          }}
-        >
-          {isConnecting ? 'Finding someone...' : '🟠 Talk Now'}
-        </button>
-
-        <button
-          onClick={handleFindTribe}
-          style={{
-            width: '100%',
-            padding: '1rem',
-            backgroundColor: '#1c1917',
-            color: 'white',
-            fontWeight: '600',
-            borderRadius: '0.75rem',
-            border: 'none',
-            cursor: 'pointer',
-            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-            transition: 'transform 0.2s',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.02)')}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-          onTouchStart={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
-          onTouchEnd={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-        >
-          🔵 Find Your Tribe
-        </button>
-      </div>
-
-      {/* Live Presence Indicator */}
-      <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-        {/*<span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '0.25rem 0.75rem',
-            borderRadius: '9999px',
-            backgroundColor: '#dcfce7',
-            color: '#047857',
-            fontSize: '0.875rem',
-            fontWeight: '600',
-            gap: '0.25rem',
-          }}
-        >
-          <span style={{ width: '0.5rem', height: '0.5rem', backgroundColor: '#10b981', borderRadius: '50%', display: 'inline-block' }}></span>
-          {onlineCount} people online · Tap to connect
-        </span>*/}
-      </div>
-
-      {/* Live Activity Feed */}
-      <div style={{ width: '100%', maxWidth: '32rem' }}>
-        <h2 style={{ color: '#44403c', fontWeight: '600', marginBottom: '0.75rem', textAlign: 'left' }}>
-          What’s happening now
-        </h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {mockLiveActivities.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => alert(`Action: ${item.action}`)}
-              style={{
-                padding: '1rem',
-                backgroundColor: 'white',
-                borderRadius: '0.75rem',
-                border: '1px solid #e5e5e5',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                cursor: 'pointer',
-                transition: 'box-shadow 0.2s',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)')}
-              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)')}
-            >
-              <p style={{ color: '#1c1917', fontSize: '0.95rem', marginBottom: '0.5rem' }}>{item.message}</p>
-              <span style={{ fontSize: '0.75rem', color: '#d97706', fontWeight: '600' }}>
-                {item.action} →
-              </span>
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold text-gray-800">WebSocket Test</h1>
+            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+              isConnected 
+                ? 'bg-green-100 text-green-800' 
+                : 'bg-red-100 text-red-800'
+            }`}>
+              {isConnected ? 'Connected' : 'Disconnected'}
             </div>
-          ))}
+          </div>
+          
+          <div className="space-y-6">
+            {/* User Setup */}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Your User ID
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={userId}
+                    onChange={(e) => setUserId(e.target.value)}
+                    placeholder="Enter your user ID (e.g., user1)"
+                    className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    disabled={isConnected}
+                  />
+                  <button
+                    onClick={connectWebSocket}
+                    disabled={!userId.trim() || isConnected}
+                    className={`px-4 py-2 rounded-lg font-medium ${
+                      isConnected || !userId.trim()
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    {isConnected ? 'Connected' : 'Connect'}
+                  </button>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Target User ID
+                </label>
+                <input
+                  type="text"
+                  value={targetUserId}
+                  onChange={(e) => setTargetUserId(e.target.value)}
+                  placeholder="Enter recipient user ID (e.g., user2)"
+                  className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Messages Area */}
+            <div className="border rounded-lg p-4 h-96 bg-gray-50 overflow-y-auto">
+              <div className="space-y-4">
+                {messages.map((msg) => (
+                  <div 
+                    key={msg.id} 
+                    className={`flex ${msg.type === 'outgoing' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-lg p-3 ${
+                        msg.type === 'incoming' 
+                          ? 'bg-blue-50 text-blue-800 border border-blue-200' 
+                          : msg.type === 'outgoing'
+                          ? 'bg-green-50 text-green-800 border border-green-200'
+                          : 'bg-gray-100 text-gray-600 italic'
+                      }`}
+                    >
+                      {msg.type !== 'system' && (
+                        <div className="text-xs font-medium mb-1">
+                          {msg.sender === 'me' ? 'You' : msg.sender}
+                        </div>
+                      )}
+                      <div className="whitespace-pre-wrap">{msg.text}</div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+
+            {/* Message Input */}
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Type a message..."
+                  className={`flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                    !isConnected || !targetUserId.trim() ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
+                  disabled={!isConnected || !targetUserId.trim()}
+                />
+                <button 
+                  onClick={sendMessage}
+                  disabled={!isConnected || !targetUserId.trim() || !message.trim()}
+                  className={`px-6 py-2 rounded-lg font-medium ${
+                    !isConnected || !targetUserId.trim() || !message.trim()
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  Send
+                </button>
+              </div>
+              
+              {error && (
+                <div className="text-red-500 text-sm p-2 bg-red-50 rounded-lg">
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {/* Instructions */}
+            <div className="bg-blue-50 p-4 rounded-lg text-sm border border-blue-200">
+              <p className="font-medium mb-2">How to test:</p>
+              <ol className="list-decimal list-inside space-y-1 ml-4">
+                <li>Open this page in <strong>two different browser tabs</strong></li>
+                <li><strong>Tab 1:</strong> Your User ID = <code>user1</code>, Target User ID = <code>user2</code></li>
+                <li><strong>Tab 2:</strong> Your User ID = <code>user2</code>, Target User ID = <code>user1</code></li>
+                <li>Click <strong>Connect</strong> in both tabs</li>
+                <li>Start sending messages!</li>
+              </ol>
+              <p className="mt-3 text-xs text-gray-600">
+                Server: WebSocket (<code>ws://178.128.210.229:8085</code>) | HTTP API (<code>http://178.128.210.229:8086</code>)
+              </p>
+            </div>
+          </div>
         </div>
       </div>
-
-      {/* Optional: global styles for pulse (if needed elsewhere) */}
-      <style jsx>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.85; }
-        }
-      `}</style>
     </div>
   );
 }

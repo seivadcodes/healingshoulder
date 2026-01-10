@@ -245,48 +245,39 @@ useEffect(() => {
   }, [router, supabase]);
 
   // Polling for new messages
-  useEffect(() => {
-    if (!selectedConversation || !currentUserId) return;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const { data: newMessages, error } = await supabase
-          .from('messages')
-          .select(`
-            *,
-            sender:sender_id (
-              full_name,
-              avatar_url
-            )
-          `)
-          .eq('conversation_id', selectedConversation.id)
-          .gt('created_at', messages[messages.length - 1]?.created_at || '1970-01-01')
-          .order('created_at', { ascending: true });
-
-        if (error) throw error;
-
-        if (newMessages && newMessages.length > 0) {
-          setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m.id));
-            const filteredNew = newMessages.filter(msg => !existingIds.has(msg.id));
-            
-            // Filter based on deletion status
-            const validNewMessages = filteredNew.filter(msg => {
-              if (msg.deleted_for_everyone) return true;
-              if (msg.deleted_for_me?.includes(currentUserId)) return false;
-              return true;
-            });
-            
-            return [...prev, ...validNewMessages];
-          });
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
+ // Instead, add WebSocket listeners
+useEffect(() => {
+  if (!selectedConversation?.id || !currentUserId) return;
+  
+  // Setup WebSocket listener
+  const ws = new WebSocket(`ws://${window.location.hostname}:8084?userId=${currentUserId}&conversationId=${selectedConversation.id}`);
+  
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      
+      if (data.type === 'new_message' && data.conversationId === selectedConversation.id) {
+        // Add new message to state if not already present
+        setMessages(prev => {
+          if (prev.some(msg => msg.id === data.message.id)) return prev;
+          
+          // Handle deleted messages appropriately
+          const msg = data.message;
+          if (msg.deleted_for_everyone) return [...prev, msg];
+          if (msg.deleted_for_me?.includes(currentUserId)) return prev;
+          
+          return [...prev, msg];
+        });
       }
-    }, 5000); // Poll every 5 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [selectedConversation, messages, currentUserId, supabase]);
+      
+      // Handle other event types (message_deleted, reaction_added, etc)
+    } catch (error) {
+      console.error('WebSocket message error:', error);
+    }
+  };
+  
+  return () => ws.close();
+}, [selectedConversation?.id, currentUserId]);
 
   // Update user online status on page visibility
   useEffect(() => {
@@ -570,73 +561,73 @@ useEffect(() => {
 }, [currentUserId, handleStartNewConversation]); 
 
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !selectedConversation || !currentUserId) return;
-     trackActivity(); 
-    const content = newMessage.trim();
-    setNewMessage('');
-    setIsSending(true);
-    setReplyingTo(null);
+ // app/messages/page.tsx (modified handleSendMessage function)
+const handleSendMessage = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!newMessage.trim() || !selectedConversation || !currentUserId) return;
+  trackActivity();
+  const content = newMessage.trim();
+  setNewMessage('');
+  setIsSending(true);
+  setReplyingTo(null);
+  const tempId = `temp-${Date.now()}`;
+  const now = new Date().toISOString();
 
-    const tempId = `temp-${Date.now()}`;
-    const now = new Date().toISOString();
-    
-    // Optimistic message update
-    const optimisticMessage: Message = {
-      id: tempId,
-      content,
-      sender_id: currentUserId,
-      created_at: now,
-      sender: { full_name: 'You' },
-      reply_to: replyingTo?.id || null,
-      conversation_id: selectedConversation.id,
-    };
-    
-    setMessages(prev => [...prev, optimisticMessage]);
-
-    try {
-      const { data: inserted, error: dbError } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: selectedConversation.id,
-          sender_id: currentUserId,
-          content,
-          reply_to: replyingTo?.id || null,
-        })
-        .select(`
-          *,
-          sender:sender_id (
-            full_name,
-            avatar_url
-          )
-        `)
-        .single();
-
-      if (dbError) throw dbError;
-
-      // Update messages with real data
-      setMessages(prev =>
-        prev.map(msg => (msg.id === tempId ? inserted : msg))
-      );
-
-      // Update conversations list
-      setConversations(prev =>
-        prev.map(conv =>
-          conv.id === selectedConversation.id
-            ? { ...conv, last_message: content, last_message_at: now }
-            : conv
-        )
-      );
-    } catch (err) {
-      console.error('Send failed:', err);
-      toast.error('Message failed to send');
-      setMessages(prev => prev.filter(msg => msg.id !== tempId));
-      setNewMessage(content);
-    } finally {
-      setIsSending(false);
-    }
+  // Optimistic message update
+  const optimisticMessage: Message = {
+    id: tempId,
+    content,
+    sender_id: currentUserId,
+    created_at: now,
+    sender: { full_name: 'You' },
+    reply_to: replyingTo?.id || null,
+    conversation_id: selectedConversation.id,
   };
+
+  setMessages(prev => [...prev, optimisticMessage]);
+
+  try {
+    const { data: inserted, error: dbError } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: selectedConversation.id,
+        sender_id: currentUserId,
+        content,
+        reply_to: replyingTo?.id || null,
+      })
+      .select(`
+        *,
+        sender:sender_id (
+          full_name,
+          avatar_url
+        )
+      `)
+      .single();
+
+    if (dbError) throw dbError;
+
+    // Update messages with real data
+    setMessages(prev =>
+      prev.map(msg => (msg.id === tempId ? inserted : msg))
+    );
+
+    // Update conversations list
+    setConversations(prev =>
+      prev.map(conv =>
+        conv.id === selectedConversation.id
+          ? { ...conv, last_message: content, last_message_at: now }
+          : conv
+      )
+    );
+  } catch (err) {
+    console.error('Send failed:', err);
+    toast.error('Message failed to send');
+    setMessages(prev => prev.filter(msg => msg.id !== tempId));
+    setNewMessage(content);
+  } finally {
+    setIsSending(false);
+  }
+};
 
 
 // Mark user as active
@@ -955,17 +946,17 @@ const safeLastSeen = otherUserLastSeen;
           </button>
           
           {selectedConversation.other_user_avatar_url ? (
-            <img
-              src={selectedConversation.other_user_avatar_url}
-              alt=""
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                objectFit: 'cover',
-                border: '2px solid #e2e8f0'
-              }}
-            />
+            <Image
+src={selectedConversation.other_user_avatar_url}
+alt=""
+width={40}
+height={40}
+style={{
+borderRadius: '50%',
+objectFit: 'cover',
+border: '2px solid #e2e8f0'
+}}
+/>
           ) : (
             <div style={{
               width: '40px',
@@ -1290,80 +1281,82 @@ const safeLastSeen = otherUserLastSeen;
                         
                         {/* Message Content */}
                         {isDeleted ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontSize: '12px' }}>🗑️</span>
-                            <span>Message deleted</span>
-                          </div>
-                        ) : msg.file_url ? (
-                          <div>
-                            {(() => {
-                              const url = msg.file_url;
-                              if (isImageUrl(url)) {
-                                return (
-                                  <img
-                                    src={url}
-                                    alt="Attachment"
-                                    style={{
-                                      maxWidth: '100%',
-                                      maxHeight: '200px',
-                                      borderRadius: '8px',
-                                      cursor: 'pointer',
-                                    }}
-                                    onClick={() => window.open(url, '_blank')}
-                                  />
-                                );
-                              }
-                              if (isPdfUrl(url)) {
-                                return (
-                                  <div
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '8px',
-                                      padding: '8px',
-                                      backgroundColor: 'white',
-                                      border: '1px solid #e2e8f0',
-                                      borderRadius: '8px',
-                                    }}
-                                  >
-                                    <div style={{ fontSize: '20px', color: '#ef4444' }}>📄</div>
-                                    <div style={{ flex: 1 }}>
-                                      <div style={{ fontWeight: '500', fontSize: '12px' }}>{msg.content}</div>
-                                      <div style={{ fontSize: '10px', color: '#64748b' }}>PDF Document</div>
-                                    </div>
-                                    <button
-                                      onClick={() => window.open(url, '_blank')}
-                                      style={{
-                                        background: 'none',
-                                        border: 'none',
-                                        color: '#4f46e5',
-                                        cursor: 'pointer',
-                                        fontSize: '12px'
-                                      }}
-                                    >
-                                      Open
-                                    </button>
-                                  </div>
-                                );
-                              }
-                              return (
-                                <a
-                                  href={url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={{
-                                    color: '#4f46e5',
-                                    textDecoration: 'underline',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    fontSize: '14px'
-                                  }}
-                                >
-                                  📎 {msg.content}
-                                </a>
-                              );
-                            })()}
+  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+    <span style={{ fontSize: '12px' }}>🗑️</span>
+    <span>Message deleted</span>
+  </div>
+) : msg.file_url ? (
+  <div>
+    {(() => {
+      const url = msg.file_url;
+      if (isImageUrl(url)) {
+        return (
+          <div style={{ position: 'relative', width: '100%', height: 'auto', maxHeight: '200px' }}>
+            <Image
+              src={url}
+              alt="Attachment"
+              fill
+              style={{
+                objectFit: 'contain',
+                borderRadius: '8px',
+                cursor: 'pointer',
+              }}
+              onClick={() => window.open(url, '_blank')}
+            />
+          </div>
+        );
+      }
+      if (isPdfUrl(url)) {
+        return (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px',
+              backgroundColor: 'white',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+            }}
+          >
+            <div style={{ fontSize: '20px', color: '#ef4444' }}>📄</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: '500', fontSize: '12px' }}>{msg.content}</div>
+              <div style={{ fontSize: '10px', color: '#64748b' }}>PDF Document</div>
+            </div>
+            <button
+              onClick={() => window.open(url, '_blank')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#4f46e5',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              Open
+            </button>
+          </div>
+        );
+      }
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: '#4f46e5',
+            textDecoration: 'underline',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '14px'
+          }}
+        >
+          📎 {msg.content}
+        </a>
+      );
+    })()}
                           </div>
                         ) : (
                           <div>{msg.content}</div>
@@ -1958,33 +1951,33 @@ const safeLastSeen = otherUserLastSeen;
                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = selectedConversation?.id === conv.id ? '#f0f4ff' : 'transparent'}
                   >
                     {conv.other_user_avatar_url ? (
-                      <img
-                        src={conv.other_user_avatar_url}
-                        alt=""
-                        style={{
-                          width: isMobileView ? '44px' : '50px',
-                          height: isMobileView ? '44px' : '50px',
-                          borderRadius: '50%',
-                          objectFit: 'cover',
-                          border: '2px solid #e2e8f0'
-                        }}
-                      />
-                    ) : (
-                      <div style={{
-                        width: isMobileView ? '44px' : '50px',
-                        height: isMobileView ? '44px' : '50px',
-                        borderRadius: '50%',
-                        backgroundColor: '#e0e7ff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: '600',
-                        fontSize: isMobileView ? '16px' : '18px',
-                        color: '#4f46e5'
-                      }}>
-                        {getInitials(conv.other_user_full_name)}
-                      </div>
-                    )}
+  <Image
+    src={conv.other_user_avatar_url}
+    alt=""
+    width={isMobileView ? 44 : 50}
+    height={isMobileView ? 44 : 50}
+    style={{
+      borderRadius: '50%',
+      objectFit: 'cover',
+      border: '2px solid #e2e8f0'
+    }}
+  />
+) : (
+  <div style={{
+    width: isMobileView ? '44px' : '50px',
+    height: isMobileView ? '44px' : '50px',
+    borderRadius: '50%',
+    backgroundColor: '#e0e7ff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: isMobileView ? '16px' : '18px',
+    color: '#4f46e5'
+  }}>
+    {getInitials(conv.other_user_full_name)}
+  </div>
+)}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: isMobileView ? '15px' : '16px',
@@ -2128,33 +2121,33 @@ const safeLastSeen = otherUserLastSeen;
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                       {selectedConversation.other_user_avatar_url ? (
-                        <img
-                          src={selectedConversation.other_user_avatar_url}
-                          alt=""
-                          style={{
-                            width: '48px',
-                            height: '48px',
-                            borderRadius: '50%',
-                            objectFit: 'cover',
-                            border: '2px solid #e2e8f0'
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          width: '48px',
-                          height: '48px',
-                          borderRadius: '50%',
-                          backgroundColor: '#e0e7ff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: '600',
-                          fontSize: '18px',
-                          color: '#4f46e5'
-                        }}>
-                          {getInitials(selectedConversation.other_user_full_name)}
-                        </div>
-                      )}
+  <Image
+    src={selectedConversation.other_user_avatar_url}
+    alt=""
+    width={48}
+    height={48}
+    style={{
+      borderRadius: '50%',
+      objectFit: 'cover',
+      border: '2px solid #e2e8f0'
+    }}
+  />
+) : (
+  <div style={{
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    backgroundColor: '#e0e7ff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: '18px',
+    color: '#4f46e5'
+  }}>
+    {getInitials(selectedConversation.other_user_full_name)}
+  </div>
+)}
                       <div style={{ flex: 1 }}>
                         <h3 style={{
   fontSize: '18px',
@@ -2500,73 +2493,75 @@ const safeLastSeen = otherUserLastSeen;
                                   ) : msg.file_url ? (
                                     <div>
                                       {(() => {
-                                        const url = msg.file_url;
-                                        if (isImageUrl(url)) {
-                                          return (
-                                            <div style={{ position: 'relative' }}>
-                                              <img
-                                                src={url}
-                                                alt="Attachment"
-                                                style={{
-                                                  maxWidth: '100%',
-                                                  maxHeight: '300px',
-                                                  borderRadius: '8px',
-                                                  cursor: 'pointer',
-                                                }}
-                                                onClick={() => window.open(url, '_blank')}
-                                              />
-                                            </div>
-                                          );
-                                        }
-                                        if (isPdfUrl(url)) {
-                                          return (
-                                            <div
-                                              style={{
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '10px',
-                                                padding: '10px',
-                                                backgroundColor: 'white',
-                                                border: '1px solid #e2e8f0',
-                                                borderRadius: '8px',
-                                              }}
-                                            >
-                                              <div style={{ fontSize: '24px', color: '#ef4444' }}>📄</div>
-                                              <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: '500' }}>{msg.content}</div>
-                                                <div style={{ fontSize: '12px', color: '#64748b' }}>PDF Document</div>
-                                              </div>
-                                              <button
-                                                onClick={() => window.open(url, '_blank')}
-                                                style={{
-                                                  background: 'none',
-                                                  border: 'none',
-                                                  color: '#4f46e5',
-                                                  cursor: 'pointer',
-                                                }}
-                                              >
-                                                Open
-                                              </button>
-                                            </div>
-                                          );
-                                        }
-                                        return (
-                                          <a
-                                            href={url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            style={{
-                                              color: '#4f46e5',
-                                              textDecoration: 'underline',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              gap: '8px',
-                                            }}
-                                          >
-                                            📎 {msg.content}
-                                          </a>
-                                        );
-                                      })()}
+  const url = msg.file_url;
+  if (isImageUrl(url)) {
+    return (
+      <div style={{ position: 'relative' }}>
+        <Image
+          src={url}
+          alt="Attachment"
+          width={400}
+          height={300}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '300px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+          }}
+          onClick={() => window.open(url, '_blank')}
+        />
+      </div>
+    );
+  }
+  if (isPdfUrl(url)) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          padding: '10px',
+          backgroundColor: 'white',
+          border: '1px solid #e2e8f0',
+          borderRadius: '8px',
+        }}
+      >
+        <div style={{ fontSize: '24px', color: '#ef4444' }}>📄</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: '500' }}>{msg.content}</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>PDF Document</div>
+        </div>
+        <button
+          onClick={() => window.open(url, '_blank')}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#4f46e5',
+            cursor: 'pointer',
+          }}
+        >
+          Open
+        </button>
+      </div>
+    );
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: '#4f46e5',
+        textDecoration: 'underline',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}
+    >
+      📎 {msg.content}
+    </a>
+  );
+})()}
                                     </div>
                                   ) : (
                                     <div>{msg.content}</div>
