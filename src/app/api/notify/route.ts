@@ -1,4 +1,3 @@
-// app/api/notify/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
@@ -6,11 +5,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     console.log('📥 API received notification:', body);
 
-    // Handle broadcast notifications (presence updates) - more flexible check
-    const isBroadcast = body.broadcast === true || body.broadcast === "true";
-    const isPresenceType = body.type?.toLowerCase() === 'user_presence';
-    
-    if (isBroadcast && isPresenceType) {
+    // Handle broadcast notifications (presence updates)
+    if (body.broadcast && body.type === 'user_presence') {
       console.log(`📤 Broadcasting presence update for user: ${body.userId}`);
       
       // Forward to signaling server with broadcast flag
@@ -40,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Handle regular notifications to specific users
-    const { toUserId, type, ...data } = body;
+    const { toUserId, } = body;
     
     if (!toUserId) {
       console.error('❌ Missing toUserId in notification');

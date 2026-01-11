@@ -1,7 +1,7 @@
 // app/messages/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import Picker from '@emoji-mart/react';
@@ -9,6 +9,7 @@ import data from '@emoji-mart/data';
 import { toast } from 'react-hot-toast';
 import CallOverlay from '@/components/calling/CallOverlay';
 import Image from 'next/image';
+
 
 
 
@@ -31,6 +32,7 @@ type ConversationSummary = {
   last_message_at?: string | null;
   other_user_last_seen?: string;
   other_user_is_online?: boolean;
+  unread_count?: number; 
 };
 
 type Message = {
@@ -354,12 +356,13 @@ export default function MessagesPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    if (messagesEndRef.current && messages.length > 0) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
+ // Replace your existing scroll effect with this:
+useLayoutEffect(() => {
+  if (messagesEndRef.current && messages.length > 0) {
+    // Instant scroll on initial load — no animation = no visible jump
+    messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+  }
+}, [messages.length]); // Only depend on length to avoid unnecessary calls
 
 
   useEffect(() => {
@@ -379,77 +382,113 @@ export default function MessagesPage() {
     };
 
     socket.onmessage = async (event) => {
-  try {
-    const data = JSON.parse(event.data.toString());
-    console.log('📩 Received message via WS:', data);
-    
-    // Handle user presence updates
-    if (data.type === 'user_presence') {
-      console.log(`👤 User presence update: ${data.userId} is ${data.isOnline ? 'online' : 'offline'}`);
-      
-      // Update the conversations list with new presence data
-      setConversations(prev => prev.map(conv => 
-        conv.other_user_id === data.userId 
-          ? { 
-              ...conv, 
-              other_user_is_online: data.isOnline,
-              other_user_last_seen: data.timestamp 
-            } 
-          : conv
-      ));
-      
-      // If this is the currently selected conversation, update the local state too
-      if (selectedConversation?.other_user_id === data.userId) {
-        setOtherUserLastSeen(data.timestamp);
-        setOtherUserPresenceLoaded(true);
+      try {
+        const data = JSON.parse(event.data.toString());
+        console.log('📩 Received message via WS:', data);
+
+        // Handle user presence updates
+        if (data.type === 'user_presence') {
+          console.log(`👤 User presence update: ${data.userId} is ${data.isOnline ? 'online' : 'offline'}`);
+
+          // Update the conversations list with new presence data
+          setConversations(prev => prev.map(conv =>
+            conv.other_user_id === data.userId
+              ? {
+                ...conv,
+                other_user_is_online: data.isOnline,
+                other_user_last_seen: data.timestamp
+              }
+              : conv
+          ));
+
+          // If this is the currently selected conversation, update the local state too
+          if (selectedConversation?.other_user_id === data.userId) {
+            setOtherUserLastSeen(data.timestamp);
+            setOtherUserPresenceLoaded(true);
+          }
+          return;
+        }
+
+        // Add this inside your socket.onmessage handler
+        if (data.type === 'message_reaction' && data.conversationId === selectedConversation?.id) {
+          console.log(`👍 Reaction update for message: ${data.messageId}`);
+
+          // Update local state with the reaction
+          setMessages(prev => prev.map(msg => {
+            if (msg.id !== data.messageId) return msg;
+
+            // Clone reactions to avoid mutation
+            const updatedReactions = { ...msg.reactions };
+
+            if (data.action === 'add') {
+              // Add reaction for this user
+              updatedReactions[data.userId] = [
+                ...(updatedReactions[data.userId] || []),
+                data.emoji
+              ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
+            } else if (data.action === 'remove') {
+              // Remove reaction for this user
+              if (updatedReactions[data.userId]) {
+                updatedReactions[data.userId] = updatedReactions[data.userId]
+                  .filter(emoji => emoji !== data.emoji);
+
+                // Clean up empty arrays
+                if (updatedReactions[data.userId].length === 0) {
+                  delete updatedReactions[data.userId];
+                }
+              }
+            }
+
+            return { ...msg, reactions: updatedReactions };
+          }));
+
+          return;
+        }
+
+        // Handle typing notifications
+        if (data.type === 'user_typing' && data.conversationId === selectedConversation?.id) {
+          console.log(`⌨️ ${data.userId} is typing: ${data.isTyping}`);
+          setIsOtherUserTyping(data.isTyping);
+          return;
+        }
+
+        // Handle new messages
+        if (data.type === 'new_message' && data.conversationId) {
+          console.log(`💬 New message in conversation: ${data.conversationId}`);
+          // Only fetch new messages if this is the active conversation
+          if (selectedConversation?.id === data.conversationId) {
+            await loadMessagesForConversation(data.conversationId);
+          } else {
+            // Refresh conversation list to update last message
+            fetchConversations();
+          }
+          return;
+        }
+
+        // Handle call notifications
+        if (data.type === 'incoming_call') {
+          console.log(`📞 Incoming call from ${data.callerName}`);
+          toast.success(`Incoming call from ${data.callerName}`);
+          // Handle call UI logic here
+        }
+
+        if (data.type === 'call_accepted') {
+          console.log(`✅ Call accepted for room: ${data.roomName}`);
+          // Handle call accepted logic
+        }
+
+        if (data.type === 'call_ended') {
+          console.log(`📴 Call ended for room: ${data.roomName}`);
+          // Handle call ended logic
+        }
+
+      } catch (error) {
+        console.error('Error processing WebSocket message:', error);
+        if (error instanceof Error) {
+          console.error('Error details:', error.message);
+        }
       }
-      return;
-    }
-    
-    // Handle typing notifications
-    if (data.type === 'user_typing' && data.conversationId === selectedConversation?.id) {
-      console.log(`⌨️ ${data.userId} is typing: ${data.isTyping}`);
-      setIsOtherUserTyping(data.isTyping);
-      return;
-    }
-    
-    // Handle new messages
-    if (data.type === 'new_message' && data.conversationId) {
-      console.log(`💬 New message in conversation: ${data.conversationId}`);
-      // Only fetch new messages if this is the active conversation
-      if (selectedConversation?.id === data.conversationId) {
-        await loadMessagesForConversation(data.conversationId);
-      } else {
-        // Refresh conversation list to update last message
-        fetchConversations();
-      }
-      return;
-    }
-    
-    // Handle call notifications
-    if (data.type === 'incoming_call') {
-      console.log(`📞 Incoming call from ${data.callerName}`);
-      toast.success(`Incoming call from ${data.callerName}`);
-      // Handle call UI logic here
-    }
-    
-    if (data.type === 'call_accepted') {
-      console.log(`✅ Call accepted for room: ${data.roomName}`);
-      // Handle call accepted logic
-    }
-    
-    if (data.type === 'call_ended') {
-      console.log(`📴 Call ended for room: ${data.roomName}`);
-      // Handle call ended logic
-    }
-    
-  } catch (error) {
-    console.error('Error processing WebSocket message:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', error.message);
-    }
-  }
-};
+    };
 
     socket.onerror = (error) => {
       console.error('WebSocket error:', error);
@@ -470,118 +509,119 @@ export default function MessagesPage() {
 
 
   useEffect(() => {
-  if (!currentUserId) return;
+    if (!currentUserId) return;
 
-  console.log(`🔄 Setting up presence tracking for user: ${currentUserId}`);
+    console.log(`🔄 Setting up presence tracking for user: ${currentUserId}`);
 
-  // Update database with online status
-  const updateDbStatus = async (isOnline: boolean) => {
-    console.log(`💾 Updating DB status for ${currentUserId}: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          is_online: isOnline,
-          last_seen: new Date().toISOString()
-        })
-        .eq('id', currentUserId);
-        
-      if (error) {
-        console.error('❌ Database update error:', error);
-        throw error;
+    // Update database with online status
+    const updateDbStatus = async (isOnline: boolean) => {
+      console.log(`💾 Updating DB status for ${currentUserId}: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            is_online: isOnline,
+            last_seen: new Date().toISOString()
+          })
+          .eq('id', currentUserId);
+
+        if (error) {
+          console.error('❌ Database update error:', error);
+          throw error;
+        }
+        console.log(`✅ DB updated successfully for user ${currentUserId}`);
+      } catch (err) {
+        console.error('🔥 Update online status DB error:', err);
       }
-      console.log(`✅ DB updated successfully for user ${currentUserId}`);
-    } catch (err) {
-      console.error('🔥 Update online status DB error:', err);
-    }
-  };
+    };
 
-  // Send presence update via WebSocket
-const sendPresenceUpdate = async (isOnline: boolean) => {
-  try {
-    await sendNotification({
-      type: 'user_presence',
-      userId: currentUserId,
-      isOnline,
-      timestamp: new Date().toISOString(),
-      broadcast: true
-    });
-  } catch (err) {
-    console.error('Failed to send presence update:', err);
-  }
-};
+    // Send presence update via WebSocket
+    const sendPresenceUpdate = async (isOnline: boolean) => {
+      try {
+        await sendNotification({
+          type: 'user_presence',
+          userId: currentUserId,
+          isOnline,
+          timestamp: new Date().toISOString(),
+          broadcast: true
+        });
+      } catch (err) {
+        console.error('Failed to send presence update:', err);
+      }
+    };
 
-  // Combined function to update both DB and broadcast
-  const updatePresence = async (isOnline: boolean) => {
-    console.log(`🔄 Starting presence update for ${currentUserId}: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
-    try {
-      await Promise.allSettled([
-        updateDbStatus(isOnline),
-        sendPresenceUpdate(isOnline)
-      ]);
-      console.log(`✅ Completed presence update for ${currentUserId}: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
-    } catch (err) {
-      console.error('🔥 Combined presence update failed:', err);
-    }
-  };
+    // Combined function to update both DB and broadcast
+    const updatePresence = async (isOnline: boolean) => {
+      console.log(`🔄 Starting presence update for ${currentUserId}: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+      try {
+        await Promise.allSettled([
+          updateDbStatus(isOnline),
+          sendPresenceUpdate(isOnline)
+        ]);
+        console.log(`✅ Completed presence update for ${currentUserId}: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+      } catch (err) {
+        console.error('🔥 Combined presence update failed:', err);
+      }
+    };
 
-  // Initial online status update
-  console.log(`🚀 Initializing presence tracking for user ${currentUserId}`);
-  updatePresence(true);
+    // Initial online status update
+    console.log(`🚀 Initializing presence tracking for user ${currentUserId}`);
+    updatePresence(true);
 
-  // Update when tab becomes visible/invisible  
-  const handleVisibilityChange = async () => {
-    if (document.hidden) {
-      console.log(`📴 Tab hidden - setting ${currentUserId} to OFFLINE`);
+    // Update when tab becomes visible/invisible  
+    const handleVisibilityChange = async () => {
+      if (document.hidden) {
+        console.log(`📴 Tab hidden - setting ${currentUserId} to OFFLINE`);
+        await updatePresence(false);
+      } else {
+        console.log(`💡 Tab visible - setting ${currentUserId} to ONLINE`);
+        await updatePresence(true);
+      }
+    };
+
+    // Update when window is closed
+    const handleBeforeUnload = async () => {
+      console.log(`CloseOperation: Setting ${currentUserId} to OFFLINE`);
       await updatePresence(false);
-    } else {
-      console.log(`💡 Tab visible - setting ${currentUserId} to ONLINE`);
-      await updatePresence(true);
-    }
-  };
+    };
 
-  // Update when window is closed
-  const handleBeforeUnload = async () => {
-    console.log(`CloseOperation: Setting ${currentUserId} to OFFLINE`);
-    await updatePresence(false);
-  };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  window.addEventListener('beforeunload', handleBeforeUnload);
+    // Heartbeat to keep presence alive
+    console.log('💓 Starting presence heartbeat (every 30 seconds)');
+    const heartbeatInterval = setInterval(async () => {
+      if (!document.hidden) {
+        console.log(`💓 Heartbeat - confirming ${currentUserId} is ONLINE`);
+        await updatePresence(true);
+      }
+    }, 30000); // Every 30 seconds
 
-  // Heartbeat to keep presence alive
-  console.log('💓 Starting presence heartbeat (every 30 seconds)');
-  const heartbeatInterval = setInterval(async () => {
-    if (!document.hidden) {
-      console.log(`💓 Heartbeat - confirming ${currentUserId} is ONLINE`);
-      await updatePresence(true);
-    }
-  }, 30000); // Every 30 seconds
+    return () => {
+      console.log('🧹 Cleaning up presence tracking');
+      clearInterval(heartbeatInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
 
-  return () => {
-    console.log('🧹 Cleaning up presence tracking');
-    clearInterval(heartbeatInterval);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-    
-    // Final offline status update with timeout to ensure it completes
-    console.log(`CloseOperation (cleanup): Setting ${currentUserId} to OFFLINE`);
-    updatePresence(false).catch(err => {
-      console.error('CloseOperation cleanup failed:', err);
-    });
-  };
-}, [currentUserId, supabase]);
+      // Final offline status update with timeout to ensure it completes
+      console.log(`CloseOperation (cleanup): Setting ${currentUserId} to OFFLINE`);
+      updatePresence(false).catch(err => {
+        console.error('CloseOperation cleanup failed:', err);
+      });
+    };
+  }, [currentUserId, supabase]);
 
   // Handle when user starts typing
   const handleUserTyping = useCallback(() => {
-    if (!selectedConversation || !currentUserId || !newMessage.trim()) return;
+    if (!selectedConversation || !currentUserId) return;
 
-    // Send typing notification to the other user
+    // Send typing notification even with empty messages
     sendNotification({
       type: 'user_typing',
       toUserId: selectedConversation.other_user_id,
       conversationId: selectedConversation.id,
-      isTyping: true
+      isTyping: true,
+      userId: currentUserId // 👈 Add this missing field
     });
 
     // Clear existing timeout
@@ -589,16 +629,17 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // After 2 seconds of no typing, send stopped typing notification
+    // After 2.5 seconds of no typing, send stopped typing notification
     typingTimeoutRef.current = setTimeout(() => {
       sendNotification({
         type: 'user_typing',
         toUserId: selectedConversation.other_user_id,
         conversationId: selectedConversation.id,
-        isTyping: false
+        isTyping: false,
+        userId: currentUserId // 👈 Add this missing field
       });
-    }, 2000);
-  }, [currentUserId, selectedConversation, newMessage]);
+    }, 2500);
+  }, [currentUserId, selectedConversation]);
 
   // Clear typing timeout when component unmounts
   useEffect(() => {
@@ -611,36 +652,42 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
 
 
   const sendNotification = async (notification: {
-  type: string;
-  toUserId?: string;
-  conversationId?: string;
-  isTyping?: boolean;
-  userId?: string;
-  isOnline?: boolean;
-  timestamp?: string;
-  broadcast?: boolean;
-  [key: string]: any;
-}) => {
-  try {
-    const response = await fetch('/api/notify', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(notification),
-    });
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Notification failed:', errorData);
+    type: string;
+    toUserId?: string;
+    conversationId?: string;
+    isTyping?: boolean;
+    userId?: string;
+    isOnline?: boolean;
+    timestamp?: string;
+    broadcast?: boolean;
+    [key: string]: unknown; // ✅ Replaces `any` — safe and lint-compliant
+  }) => {
+    try {
+      const response = await fetch('/api/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(notification),
+      });
+
+      if (!response.ok) {
+        // Safely extract error info even if response isn't JSON
+        let errorData;
+        const text = await response.text();
+        try {
+          errorData = JSON.parse(text);
+        } catch {
+          errorData = { error: 'Non-JSON server response', details: text.trim().substring(0, 200) };
+        }
+        return false;
+      }
+
+      return true;
+    } catch (error) {
       return false;
     }
-    return true;
-  } catch (error) {
-    console.error('Failed to send notification:', error);
-    return false;
-  }
-};
-
+  };
 
 
 
@@ -681,106 +728,136 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
   };
 
   const handleReaction = async (messageId: string, emoji: string) => {
-    if (!currentUserId) return;
+    if (!currentUserId || !selectedConversation?.id) return;
 
     try {
-      // Get current message
-      const { data: currentMessage, error: fetchError } = await supabase
-        .from('messages')
-        .select('reactions')
-        .eq('id', messageId)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      const currentReactions = currentMessage.reactions || {};
+      // Optimistically get current message reactions from local state (faster UX)
+      const currentMessage = messages.find(m => m.id === messageId);
+      const currentReactions = currentMessage?.reactions || {};
       const userReactions: string[] = currentReactions[currentUserId] || [];
 
-      // Toggle reaction - remove if already exists, add if not
-      let updatedReactions;
-      if (userReactions.includes(emoji)) {
-        updatedReactions = {
-          ...currentReactions,
-          [currentUserId]: userReactions.filter(r => r !== emoji)
-        };
+      const isAdding = !userReactions.includes(emoji);
+
+      // Prepare updated reactions object
+      const updatedReactions = { ...currentReactions };
+      if (isAdding) {
+        updatedReactions[currentUserId] = [...userReactions, emoji];
       } else {
-        updatedReactions = {
-          ...currentReactions,
-          [currentUserId]: [...userReactions, emoji]
-        };
+        const filtered = userReactions.filter(r => r !== emoji);
+        if (filtered.length === 0) {
+          delete updatedReactions[currentUserId];
+        } else {
+          updatedReactions[currentUserId] = filtered;
+        }
       }
 
-      // Update in database
+      // Optimistic UI update
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === messageId ? { ...msg, reactions: updatedReactions } : msg
+        )
+      );
+
+      // Close picker immediately
+      setShowReactionPicker(null);
+
+      // Save to Supabase
       const { error: updateError } = await supabase
         .from('messages')
         .update({ reactions: updatedReactions })
         .eq('id', messageId);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        throw updateError;
+      }
 
-      // Update local state
-      setMessages(prev => prev.map(msg =>
-        msg.id === messageId
-          ? { ...msg, reactions: updatedReactions }
-          : msg
-      ));
-
-      setShowReactionPicker(null);
+      // 🔥 Broadcast real-time reaction to others in the conversation
+      // Update this part of handleReaction
+      await sendNotification({
+        type: 'message_reaction',
+        conversationId: selectedConversation.id,
+        messageId,
+        userId: currentUserId,
+        emoji,
+        action: isAdding ? 'add' : 'remove',
+        toUserId: selectedConversation.other_user_id, // Add this line
+      });
     } catch (err) {
       console.error('Reaction error:', err);
-      toast.error('Failed to add reaction');
+      toast.error('Failed to update reaction');
+      // Optional: rollback optimistic update on error
     }
   };
 
   const openConversation = async (conv: ConversationSummary) => {
-    if (!currentUserId) return;
-
-    setSelectedConversation(conv);
-    setMessages([]);
-    setReplyingTo(null);
-    setShowConversationMenu(null);
-
-    if (isMobileView) {
-      setShowChatView(true);
-    }
-
+  if (!currentUserId) return;
+  setSelectedConversation(conv);
+  setMessages([]);
+  setReplyingTo(null);
+  setShowConversationMenu(null);
+  
+  // Mark messages as read when opening conversation
+  if (conv.unread_count && conv.unread_count > 0) {
     try {
-      // Get all messages, including those marked as deleted
-      const { data: allMessages, error: msgError } = await supabase
-        .from('messages')
-        .select(`
-          *,
-          sender:sender_id (
-            full_name,
-            avatar_url
-          )
-        `)
-        .eq('conversation_id', conv.id)
-        .order('created_at', { ascending: true });
-
-      if (msgError) throw msgError;
-
-      // Filter messages based on deletion status
-      const filteredMessages = (allMessages || []).filter(msg => {
-        // If message is deleted for everyone, always show it as tombstone
-        if (msg.deleted_for_everyone) {
-          return true;
-        }
-
-        // If message is deleted for me, hide it
-        if (msg.deleted_for_me?.includes(currentUserId)) {
-          return false;
-        }
-
-        return true;
-      });
-
-      setMessages(filteredMessages);
+      // Update local state first for immediate UI feedback
+      setConversations(prev => prev.map(c => 
+        c.id === conv.id ? { ...c, unread_count: 0 } : c
+      ));
+      
+      // Then update database
+      await supabase
+        .rpc('mark_messages_as_read', {
+          conversation_id: conv.id,
+          user_id: currentUserId
+        });
     } catch (err) {
-      console.error('Error loading messages:', err);
-      toast.error('Failed to load conversation');
+      console.error('Error marking messages as read:', err);
+      // Optionally rollback UI if needed
+      setConversations(prev => prev.map(c => 
+        c.id === conv.id ? { ...c, unread_count: conv.unread_count } : c
+      ));
     }
-  };
+  }
+  
+  if (isMobileView) {
+    setShowChatView(true);
+  }
+  
+  try {
+    // Get all messages, including those marked as deleted
+    const { data: allMessages, error: msgError } = await supabase
+      .from('messages')
+      .select(`
+        *,
+        sender:sender_id (
+          full_name,
+          avatar_url
+        )
+      `)
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: true });
+    
+    if (msgError) throw msgError;
+    
+    // Filter messages based on deletion status
+    const filteredMessages = (allMessages || []).filter(msg => {
+      // If message is deleted for everyone, always show it as tombstone
+      if (msg.deleted_for_everyone) {
+        return true;
+      }
+      // If message is deleted for me, hide it
+      if (msg.deleted_for_me?.includes(currentUserId)) {
+        return false;
+      }
+      return true;
+    });
+    
+    setMessages(filteredMessages);
+  } catch (err) {
+    console.error('Error loading messages:', err);
+    toast.error('Failed to load conversation');
+  }
+};
 
 
   const handleStartNewConversation = useCallback(async (userId: string) => {
@@ -1139,26 +1216,43 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     trackActivity();
-
     const file = e.target.files?.[0];
     if (!file || !selectedConversation || !currentUserId) return;
-
     setUploading(true);
-
     try {
       const fileName = `${currentUserId}/${selectedConversation.id}/${Date.now()}_${file.name}`;
 
+      // Upload file
       const { error: uploadError } = await supabase.storage
         .from('message-files')
         .upload(fileName, file);
-
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
+      const { data } = await supabase.storage
         .from('message-files')
         .getPublicUrl(fileName);
+      const publicUrl = data.publicUrl;
 
-      const { error: msgError } = await supabase
+      // Optimistic message
+      const tempId = `temp-${Date.now()}`;
+      const now = new Date().toISOString();
+      const optimisticMessage: Message = {
+        id: tempId,
+        content: file.name,
+        sender_id: currentUserId,
+        created_at: now,
+        sender: { full_name: 'You' },
+        file_url: publicUrl,
+        file_type: file.type,
+        conversation_id: selectedConversation.id,
+        reactions: {},
+        reply_to: null,
+      };
+
+      setMessages(prev => [...prev, optimisticMessage]);
+
+      // Insert and get full message
+      const { data: inserted, error: msgError } = await supabase
         .from('messages')
         .insert({
           conversation_id: selectedConversation.id,
@@ -1166,21 +1260,37 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
           content: file.name,
           file_url: publicUrl,
           file_type: file.type,
-        });
+        })
+        .select(`
+        *,
+        sender:sender_id (
+          full_name,
+          avatar_url
+        )
+      `)
+        .single();
 
       if (msgError) throw msgError;
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      // Replace optimistic with real
+      setMessages(prev => prev.map(msg => msg.id === tempId ? inserted : msg));
 
-      toast.success('File sent successfully');
+      // Update conversation preview
+      setConversations(prev =>
+        prev.map(conv =>
+          conv.id === selectedConversation.id
+            ? { ...conv, last_message: file.name, last_message_at: now }
+            : conv
+        )
+      );
+
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      toast.success('File sent!');
     } catch (err) {
       console.error('File upload error:', err);
       toast.error('Failed to send file');
     } finally {
       setUploading(false);
-
     }
   };
 
@@ -1651,14 +1761,19 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
                               const url = msg.file_url;
                               if (isImageUrl(url)) {
                                 return (
-                                  <div style={{ position: 'relative', width: '100%', height: 'auto', maxHeight: '200px' }}>
+                                  <div style={{
+                                    position: 'relative',
+                                    width: '300px',      // ✅ full message width
+                                    height: '300px',    // ✅ minimum visible height (not auto!)
+                                    borderRadius: '8px',
+                                    overflow: 'hidden',
+                                  }}>
                                     <Image
                                       src={url}
                                       alt="Attachment"
                                       fill
                                       style={{
-                                        objectFit: 'contain',
-                                        borderRadius: '8px',
+                                        objectFit: 'cover', // or 'contain' if you prefer no cropping
                                         cursor: 'pointer',
                                       }}
                                       onClick={() => window.open(url, '_blank')}
@@ -1911,16 +2026,32 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
               style={{
                 background: 'none',
                 border: 'none',
-                fontSize: '20px',
-                cursor: 'pointer',
-                color: '#64748b',
-                padding: '8px',
+                width: '36px',
+                height: '36px',
+                borderRadius: '12px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                color: '#64748b',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = '#f1f5f9';
+                e.currentTarget.style.color = '#3b82f6';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#64748b';
               }}
             >
-              😊
+              {/* Grey/Flat Face SVG */}
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" stroke="#64748b" />
+                <path stroke="#64748b" strokeLinecap="round" strokeLinejoin="round" d="M8 14s1.5 2 4 2 4-2 4-2" />
+                <path stroke="#64748b" strokeLinecap="round" strokeLinejoin="round" d="M9 9h.01" />
+                <path stroke="#64748b" strokeLinecap="round" strokeLinejoin="round" d="M15 9h.01" />
+              </svg>
             </button>
 
             <input
@@ -1929,6 +2060,7 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
               value={newMessage}
               onChange={(e) => {
                 setNewMessage(e.target.value);
+                handleUserTyping();
                 trackActivity(); // 👈 this marks you as active while typing
               }}
               placeholder={replyingTo ? "Write your reply..." : "Type your message…"}
@@ -1961,7 +2093,21 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
               {uploading ? (
                 <div style={{ color: '#94a3b8' }}>📤</div>
               ) : (
-                <div style={{ fontSize: '20px', color: '#64748b' }}>📎</div>
+                <label htmlFor="file-upload" style={{
+                  cursor: 'pointer',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <input id="file-upload" type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,.pdf" style={{ display: 'none' }} />
+                  {uploading ? (
+                    <div style={{ color: '#94a3b8' }}>📤</div>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                    </svg>
+                  )}
+                </label>
               )}
             </label>
 
@@ -2006,6 +2152,7 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
                 onEmojiSelect={handleEmojiSelect}
                 theme="light"
                 previewPosition="none"
+                set="twitter"
                 maxFrequentRows={0}
                 navPosition="none"
                 skinTonePosition="none"
@@ -2288,205 +2435,238 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
           flexWrap: isMobileView ? 'wrap' : 'nowrap'
         }}>
           {/* Conversations Sidebar */}
-          <div style={{
-            flex: '1',
-            minWidth: isMobileView ? '100%' : '300px',
-            maxWidth: isMobileView ? '100%' : '400px',
-            backgroundColor: 'white',
-            borderRadius: isMobileView ? '12px' : '16px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              padding: isMobileView ? '16px' : '20px',
+<div style={{
+  flex: '1',
+  minWidth: isMobileView ? '100%' : '300px',
+  maxWidth: isMobileView ? '100%' : '400px',
+  backgroundColor: 'white',
+  borderRadius: isMobileView ? '12px' : '16px',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+  overflow: 'hidden'
+}}>
+  <div style={{
+    padding: isMobileView ? '16px' : '20px',
+    borderBottom: '1px solid #f1f5f6',
+    backgroundColor: '#f8fafc'
+  }}>
+    <h2 style={{ fontSize: isMobileView ? '16px' : '18px', fontWeight: '600', color: '#334155' }}>
+      Your Conversations
+    </h2>
+  </div>
+  <div style={{
+    maxHeight: isMobileView ? 'calc(100vh - 180px)' : '600px',
+    overflowY: 'auto'
+  }}>
+    {conversations.length === 0 ? (
+      <div style={{
+        padding: '40px 20px',
+        textAlign: 'center',
+        color: '#94a3b8'
+      }}>
+        <div style={{
+          fontSize: '48px',
+          marginBottom: '16px',
+          opacity: 0.4
+        }}>💬</div>
+        <p style={{ fontSize: '15px' }}>
+          No conversations yet.<br />
+          Start one with someone who understands.
+        </p>
+      </div>
+    ) : (
+      conversations.map(conv => {
+        const hasUnread = (conv.unread_count || 0) > 0;
+        const isSelected = selectedConversation?.id === conv.id;
+        
+        return (
+          <div
+            key={conv.id}
+            onClick={() => openConversation(conv)}
+            style={{
+              padding: isMobileView ? '12px 16px' : '16px 20px',
+              cursor: 'pointer',
+              display: 'flex',
+              gap: '12px',
               borderBottom: '1px solid #f1f5f6',
-              backgroundColor: '#f8fafc'
-            }}>
-              <h2 style={{ fontSize: isMobileView ? '16px' : '18px', fontWeight: '600', color: '#334155' }}>
-                Your Conversations
-              </h2>
-            </div>
-            <div style={{
-              maxHeight: isMobileView ? 'calc(100vh - 180px)' : '600px',
-              overflowY: 'auto'
-            }}>
-              {conversations.length === 0 ? (
+              backgroundColor: isSelected ? '#f0f4ff' : (hasUnread ? '#f8fafc' : 'transparent'),
+              position: 'relative',
+              borderLeft: hasUnread && !isSelected ? '3px solid #4f46e5' : '3px solid transparent',
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = isSelected ? '#f0f4ff' : (hasUnread ? '#f1f8ff' : '#f8fafc')}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = isSelected ? '#f0f4ff' : (hasUnread ? '#f8fafc' : 'transparent')}
+          >
+            {conv.other_user_avatar_url ? (
+              <Image
+                src={conv.other_user_avatar_url}
+                alt=""
+                width={isMobileView ? 44 : 50}
+                height={isMobileView ? 44 : 50}
+                style={{
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '2px solid #e2e8f0',
+                  opacity: hasUnread ? 1 : 0.8,
+                }}
+              />
+            ) : (
+              <div style={{
+                width: isMobileView ? '44px' : '50px',
+                height: isMobileView ? '44px' : '50px',
+                borderRadius: '50%',
+                backgroundColor: '#e0e7ff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '600',
+                fontSize: isMobileView ? '16px' : '18px',
+                color: '#4f46e5',
+                opacity: hasUnread ? 1 : 0.8,
+              }}>
+                {getInitials(conv.other_user_full_name)}
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: isMobileView ? '15px' : '16px',
+                fontWeight: hasUnread ? '700' : '600',
+                color: '#1e293b',
+                marginBottom: '4px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                {conv.other_user_full_name}
+                {isUserOnline(conv.other_user_last_seen) && (
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: '#10b981',
+                    display: 'inline-block'
+                  }}></span>
+                )}
+              </div>
+              {conv.last_message && (
                 <div style={{
-                  padding: '40px 20px',
-                  textAlign: 'center',
-                  color: '#94a3b8'
+                  fontSize: isMobileView ? '13px' : '14px',
+                  color: hasUnread ? '#1e293b' : '#64748b',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  marginBottom: '2px',
+                  fontWeight: hasUnread ? '500' : 'normal'
                 }}>
-                  <div style={{
-                    fontSize: '48px',
-                    marginBottom: '16px',
-                    opacity: 0.4
-                  }}>💬</div>
-                  <p style={{ fontSize: '15px' }}>
-                    No conversations yet.<br />
-                    Start one with someone who understands.
-                  </p>
+                  {conv.last_message === '[Message deleted]' ? 'Message deleted' : conv.last_message}
                 </div>
-              ) : (
-                conversations.map(conv => (
-                  <div
-                    key={conv.id}
-                    onClick={() => openConversation(conv)}
-                    style={{
-                      padding: isMobileView ? '12px 16px' : '16px 20px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      gap: '12px',
-                      borderBottom: '1px solid #f1f5f6',
-                      backgroundColor: selectedConversation?.id === conv.id ? '#f0f4ff' : 'transparent',
-                      position: 'relative'
+              )}
+              {conv.last_message_at && (
+                <div style={{
+                  fontSize: isMobileView ? '11px' : '12px',
+                  color: '#94a3b8',
+                  marginTop: '2px'
+                }}>
+                  {formatDate(conv.last_message_at)}
+                </div>
+              )}
+            </div>
+
+            {/* Unread message badge */}
+            {hasUnread && (
+              <div style={{
+                position: 'absolute',
+                top: isMobileView ? '18px' : '20px',
+                right: isMobileView ? '16px' : '20px',
+                backgroundColor: '#4f46e5',
+                color: 'white',
+                borderRadius: '9999px',
+                fontSize: '11px',
+                minWidth: '18px',
+                height: '18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                padding: '0 4px',
+                zIndex: 2,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+              }}>
+                {conv.unread_count && conv.unread_count > 9 ? '9+' : conv.unread_count}
+              </div>
+            )}
+            
+            {/* Conversation Menu Button */}
+            <div className="conversation-menu-container" style={{ position: 'relative' }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowConversationMenu(showConversationMenu === conv.id ? null : conv.id);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '20px',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                ⋮
+              </button>
+
+              {/* Conversation Menu Dropdown */}
+              {showConversationMenu === conv.id && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  backgroundColor: 'white',
+                  borderRadius: '8px',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                  zIndex: 10,
+                  minWidth: '160px',
+                  overflow: 'hidden'
+                }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDeleteConfirm(conv.id);
                     }}
-                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = selectedConversation?.id === conv.id ? '#f0f4ff' : '#f8fafc'}
-                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = selectedConversation?.id === conv.id ? '#f0f4ff' : 'transparent'}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: '#ef4444',
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
-                    {conv.other_user_avatar_url ? (
-                      <Image
-                        src={conv.other_user_avatar_url}
-                        alt=""
-                        width={isMobileView ? 44 : 50}
-                        height={isMobileView ? 44 : 50}
-                        style={{
-                          borderRadius: '50%',
-                          objectFit: 'cover',
-                          border: '2px solid #e2e8f0'
-                        }}
-                      />
-                    ) : (
-                      <div style={{
-                        width: isMobileView ? '44px' : '50px',
-                        height: isMobileView ? '44px' : '50px',
-                        borderRadius: '50%',
-                        backgroundColor: '#e0e7ff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: '600',
-                        fontSize: isMobileView ? '16px' : '18px',
-                        color: '#4f46e5'
-                      }}>
-                        {getInitials(conv.other_user_full_name)}
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: isMobileView ? '15px' : '16px',
-                        fontWeight: '600',
-                        color: '#1e293b',
-                        marginBottom: '4px',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}>
-                        {conv.other_user_full_name}
-                        {isUserOnline(conv.other_user_last_seen) && (
-                          <span style={{
-                            width: '8px',
-                            height: '8px',
-                            borderRadius: '50%',
-                            backgroundColor: '#10b981',
-                            display: 'inline-block'
-                          }}></span>
-                        )}
-                      </div>
-                      {conv.last_message && (
-                        <div style={{
-                          fontSize: isMobileView ? '13px' : '14px',
-                          color: '#64748b',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          marginBottom: '2px'
-                        }}>
-                          {conv.last_message === '[Message deleted]' ? 'Message deleted' : conv.last_message}
-                        </div>
-                      )}
-                      {conv.last_message_at && (
-                        <div style={{
-                          fontSize: isMobileView ? '11px' : '12px',
-                          color: '#94a3b8',
-                          marginTop: '2px'
-                        }}>
-                          {formatDate(conv.last_message_at)}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Conversation Menu Button */}
-                    <div className="conversation-menu-container" style={{ position: 'relative' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowConversationMenu(showConversationMenu === conv.id ? null : conv.id);
-                        }}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#94a3b8',
-                          cursor: 'pointer',
-                          fontSize: '20px',
-                          padding: '4px',
-                          borderRadius: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                      >
-                        ⋮
-                      </button>
-
-                      {/* Conversation Menu Dropdown */}
-                      {showConversationMenu === conv.id && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '100%',
-                          right: 0,
-                          backgroundColor: 'white',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                          zIndex: 10,
-                          minWidth: '160px',
-                          overflow: 'hidden'
-                        }}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowDeleteConfirm(conv.id);
-                            }}
-                            style={{
-                              width: '100%',
-                              padding: '12px 16px',
-                              textAlign: 'left',
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              color: '#ef4444',
-                              fontSize: '14px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '8px'
-                            }}
-                            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-                            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                          >
-                            🗑️ Delete Conversation
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
+                    🗑️ Delete Conversation
+                  </button>
+                </div>
               )}
             </div>
           </div>
+        );
+      })
+    )}
+  </div>
+</div>
 
           {/* Desktop Chat Area */}
           {!isMobileView && (
@@ -3102,13 +3282,32 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
                         style={{
                           background: 'none',
                           border: 'none',
-                          fontSize: '20px',
-                          cursor: 'pointer',
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                           color: '#64748b',
-                          padding: '8px'
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.backgroundColor = '#f1f5f9';
+                          e.currentTarget.style.color = '#3b82f6';
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.color = '#64748b';
                         }}
                       >
-                        😊
+                        {/* Grey/Flat Face SVG */}
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10" stroke="#64748b" />
+                          <path stroke="#64748b" strokeLinecap="round" strokeLinejoin="round" d="M8 14s1.5 2 4 2 4-2 4-2" />
+                          <path stroke="#64748b" strokeLinecap="round" strokeLinejoin="round" d="M9 9h.01" />
+                          <path stroke="#64748b" strokeLinecap="round" strokeLinejoin="round" d="M15 9h.01" />
+                        </svg>
                       </button>
 
                       <input
@@ -3150,7 +3349,21 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
                         {uploading ? (
                           <div style={{ color: '#94a3b8' }}>📤</div>
                         ) : (
-                          <div style={{ fontSize: '20px', color: '#64748b' }}>📎</div>
+                          <label htmlFor="file-upload" style={{
+                            cursor: 'pointer',
+                            padding: '8px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}>
+                            <input id="file-upload" type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,.pdf" style={{ display: 'none' }} />
+                            {uploading ? (
+                              <div style={{ color: '#94a3b8' }}>📤</div>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                              </svg>
+                            )}
+                          </label>
                         )}
                       </label>
 
@@ -3193,6 +3406,7 @@ const sendPresenceUpdate = async (isOnline: boolean) => {
                         <Picker
                           data={data}
                           onEmojiSelect={handleEmojiSelect}
+                          set="twitter"
                           theme="light"
                           previewPosition="none"
                           maxFrequentRows={0}

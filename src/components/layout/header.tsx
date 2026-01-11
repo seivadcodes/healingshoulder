@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Home, User, LogOut, Phone, X } from 'lucide-react';
+import { Home, User, LogOut, Phone, X, MessageSquare, Bell } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
@@ -23,6 +23,9 @@ export default function Header() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [incomingCall, setIncomingCall] = useState<CallInvitation | null>(null);
   const [showCallBanner, setShowCallBanner] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [isUnreadLoading, setIsUnreadLoading] = useState(true);
+  const [unreadNotifications, setUnreadNotifications] = useState(0); // For future notification bell
   const menuRef = useRef<HTMLDivElement>(null);
 
   const supabase = useMemo(() => createClient(), []);
@@ -53,6 +56,44 @@ export default function Header() {
 
     fetchProfile();
   }, [user, supabase]);
+
+  useEffect(() => {
+  if (!user?.id) {
+    setUnreadMessages(0);
+    setIsUnreadLoading(false);
+    return;
+  }
+
+  const fetchUnreadCount = async () => {
+    try {
+      // 👇 THIS IS THE LINE THAT NEEDS CHANGING (line 77)
+      const { data, error } = await supabase
+        .rpc('get_total_unread_messages', { target_user_id: user.id }); // ✅ CORRECT PARAM NAME
+      
+      if (error) throw error;
+      setUnreadMessages(data?.total_unread || 0);
+    } catch (err) {
+      console.error('Error fetching unread messages:', err);
+      setUnreadMessages(0);
+    } finally {
+      setIsUnreadLoading(false);
+    }
+  };
+
+  fetchUnreadCount();
+    
+    // Set up real-time updates for unread count
+    const channel = supabase
+      .channel(`user:${user.id}:messages`)
+      .on('broadcast', { event: 'unread_count_update' }, (payload) => {
+        setUnreadMessages(payload.payload.count || 0);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, supabase]);
 
   // 🔔 Listen for incoming call invitations
   useEffect(() => {
@@ -194,126 +235,234 @@ export default function Header() {
           </Link>
 
           {user ? (
-            <div ref={menuRef} style={{ position: 'relative' }}>
-              <button
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              {/* Messages Icon with Unread Badge */}
+              <Link
+                href="/messages"
                 style={{
-                  width: '2rem',
-                  height: '2rem',
-                  borderRadius: '9999px',
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: 'white',
+                  textDecoration: 'none',
+                  padding: '0.5rem',
+                  borderRadius: '0.375rem',
+                  transition: 'background-color 0.2s'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                aria-label="Messages"
+              >
+                <MessageSquare size={20} color="white" />
+                
+                {/* Unread messages badge */}
+                {!isUnreadLoading && unreadMessages > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    backgroundColor: '#ef4444',
+                    color: 'white',
+                    borderRadius: '9999px',
+                    fontSize: '0.625rem',
+                    minWidth: '16px',
+                    height: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                    padding: '0 3px',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}>
+                    {unreadMessages > 9 ? '9+' : unreadMessages}
+                  </div>
+                )}
+              </Link>
+
+              {/* Notification Bell Icon (placeholder for future logic) */}
+              <button
+                onClick={() => {
+                  // TODO: Add notification dropdown logic here later
+                  console.log('Notifications clicked - add logic later');
+                }}
+                style={{
+                  position: 'relative',
+                  background: 'none',
+                  border: 'none',
+                  color: 'white',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  borderRadius: '0.375rem',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  border: 'none',
-                  cursor: 'pointer',
-                  backgroundColor: 'transparent',
-                  padding: 0,
+                  transition: 'background-color 0.2s'
                 }}
-                aria-label="User menu"
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                aria-label="Notifications"
               >
-                {profileLoading ? (
-                  <div
-                    style={{
-                      width: '2rem',
-                      height: '2rem',
-                      borderRadius: '9999px',
-                      backgroundColor: '#60a5fa',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontWeight: 500,
-                      fontSize: '0.875rem',
-                    }}
-                  >
-                    {initials}
-                  </div>
-                ) : profile?.avatar_url ? (
-                  <Image
-                    unoptimized
-                    src={profile.avatar_url}
-                    alt="Your avatar"
-                    width={32}
-                    height={32}
-                    style={{
-                      width: '2rem',
-                      height: '2rem',
-                      borderRadius: '9999px',
-                      objectFit: 'cover',
-                      border: '2px solid white',
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: '2rem',
-                      height: '2rem',
-                      borderRadius: '9999px',
-                      backgroundColor: '#60a5fa',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontWeight: 500,
-                      fontSize: '0.875rem',
-                    }}
-                  >
-                    {initials}
+                <Bell size={20} color="white" />
+                
+                {/* Notification badge - placeholder for future implementation */}
+                {unreadNotifications > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    backgroundColor: '#fbbf24',
+                    color: 'white',
+                    borderRadius: '9999px',
+                    fontSize: '0.625rem',
+                    minWidth: '16px',
+                    height: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                    padding: '0 3px',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}>
+                    {unreadNotifications > 9 ? '9+' : unreadNotifications}
                   </div>
                 )}
               </button>
 
-              {isMenuOpen && (
-                <div
+              {/* User Menu */}
+              <div ref={menuRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setIsMenuOpen(!isMenuOpen)}
                   style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: '2.5rem',
-                    width: '12rem',
-                    backgroundColor: 'white',
-                    border: '1px solid #e2e2e2',
-                    borderRadius: '0.5rem',
-                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
-                    padding: '0.25rem 0',
-                    zIndex: 50,
+                    width: '2rem',
+                    height: '2rem',
+                    borderRadius: '9999px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: 'transparent',
+                    padding: 0,
                   }}
+                  aria-label="User menu"
                 >
-                  <Link
-                    href="/dashboard"
+                  {profileLoading ? (
+                    <div
+                      style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: '9999px',
+                        backgroundColor: '#60a5fa',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        fontWeight: 500,
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      {initials}
+                    </div>
+                  ) : profile?.avatar_url ? (
+                    <Image
+                      unoptimized
+                      src={profile.avatar_url}
+                      alt="Your avatar"
+                      width={32}
+                      height={32}
+                      style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: '9999px',
+                        objectFit: 'cover',
+                        border: '2px solid white',
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: '9999px',
+                        backgroundColor: '#60a5fa',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        fontWeight: 500,
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      {initials}
+                    </div>
+                  )}
+                </button>
+
+                {isMenuOpen && (
+                  <div
                     style={{
-                      display: 'block',
-                      padding: '0.5rem 1rem',
-                      fontSize: '0.875rem',
-                      color: '#3f3f46',
-                      textDecoration: 'none',
+                      position: 'absolute',
+                      right: 0,
+                      top: '2.5rem',
+                      width: '12rem',
+                      backgroundColor: 'white',
+                      border: '1px solid #e2e2e2',
+                      borderRadius: '0.5rem',
+                      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                      padding: '0.25rem 0',
+                      zIndex: 50,
                     }}
-                    onClick={() => setIsMenuOpen(false)}
                   >
-                    Dashboard
-                  </Link>
-                  <button
-                    onClick={handleLogout}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.5rem 1rem',
-                      fontSize: '0.875rem',
-                      color: '#3f3f46',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                  >
-                    <LogOut size={16} />
-                    Sign Out
-                  </button>
-                </div>
-              )}
+                    <Link
+                      href="/dashboard"
+                      style={{
+                        display: 'block',
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.875rem',
+                        color: '#3f3f46',
+                        textDecoration: 'none',
+                      }}
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      Dashboard
+                    </Link>
+                    <Link
+                      href="/notifications"
+                      style={{
+                        display: 'block',
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.875rem',
+                        color: '#3f3f46',
+                        textDecoration: 'none',
+                      }}
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      Notifications
+                    </Link>
+                    <button
+                      onClick={handleLogout}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.875rem',
+                        color: '#3f3f46',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <LogOut size={16} />
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <Link
