@@ -15,9 +15,7 @@ type CallInvitation = {
   room_id: string;
 };
 
-interface ConversationItem {
-  unread_count: number;
-}
+
 
 export default function Header() {
   const { user, loading: authLoading, signOut } = useAuth();
@@ -30,10 +28,10 @@ export default function Header() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [isUnreadLoading, setIsUnreadLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [wsConnected, setWsConnected] = useState(false);
+ 
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false); // ✅ MODAL STATE
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   const menuRef = useRef<HTMLDivElement>(null);
   const supabase = useMemo(() => createClient(), []);
 
@@ -131,7 +129,7 @@ useEffect(() => {
 
     socket.onopen = () => {
       console.log('HeaderCode WebSocket connected');
-      setWsConnected(true);
+      
       fetchAllUnreadCounts();
     };
 
@@ -157,10 +155,10 @@ useEffect(() => {
       }
     };
 
-    socket.onclose = () => setWsConnected(false);
+    socket.onclose = () => 
     socket.onerror = (err) => {
       console.error('HeaderCode WebSocket error:', err);
-      setWsConnected(false);
+     
     };
 
     wsRef.current = socket;

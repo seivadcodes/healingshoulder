@@ -137,6 +137,7 @@ export default function MessagesPage() {
   const [showMessageMenu, setShowMessageMenu] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const lastActivityRef = useRef(Date.now());
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
 
   // New state for long press/reactions
   const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
@@ -148,7 +149,7 @@ export default function MessagesPage() {
   const [showChatView, setShowChatView] = useState(false);
 
   // In Header.tsx
-  const currentUserIdRef = useRef<string | null>(null);
+
 
   const messageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -157,6 +158,15 @@ export default function MessagesPage() {
 
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const [offlineMessageQueue, setOfflineMessageQueue] = useState<Array<{
+    tempId: string;
+    content: string;
+    conversationId: string;
+    replyTo?: string | null;
+    fileUrl?: string;
+    fileType?: string;
+  }>>([]);
+  const [isOnline, setIsOnline] = useState(true);
 
   const {
 
@@ -261,86 +271,104 @@ export default function MessagesPage() {
     loadInitialData();
   }, [router, supabase]);
 
-  // Polling for new messages
-  useEffect(() => {
-    if (!selectedConversation || !currentUserId) return;
 
-    const pollInterval = setInterval(async () => {
-      try {
-        const { data: newMessages, error } = await supabase
-          .from('messages')
-          .select(`
-            *,
-            sender:sender_id (
-              full_name,
-              avatar_url
-            )
-          `)
-          .eq('conversation_id', selectedConversation.id)
-          .gt('created_at', messages[messages.length - 1]?.created_at || '1970-01-01')
-          .order('created_at', { ascending: true });
-
-        if (error) throw error;
-
-        if (newMessages && newMessages.length > 0) {
-          setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m.id));
-            const filteredNew = newMessages.filter(msg => !existingIds.has(msg.id));
-
-            // Filter based on deletion status
-            const validNewMessages = filteredNew.filter(msg => {
-              if (msg.deleted_for_everyone) return true;
-              if (msg.deleted_for_me?.includes(currentUserId)) return false;
-              return true;
-            });
-
-            return [...prev, ...validNewMessages];
-          });
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 5000); // Poll every 5 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [selectedConversation, messages, currentUserId, supabase]);
 
   // Update user online status on page visibility
-  useEffect(() => {
-    const updateOnlineStatus = async () => {
-      if (!currentUserId) return;
+ // ✅ Activity-aware presence tracking with proper cleanup and const usage
+useEffect(() => {
+  if (!currentUserId) return;
 
-      try {
+  let lastActivity = Date.now();
+  let isCurrentlyOnline = true;
+  const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+
+  const handleActivity = () => {
+    lastActivity = Date.now();
+    if (!isCurrentlyOnline) {
+      updatePresenceStatus(true);
+      isCurrentlyOnline = true;
+    }
+  };
+
+  ACTIVITY_EVENTS.forEach(event =>
+    document.addEventListener(event, handleActivity, { passive: true })
+  );
+
+  const updatePresenceStatus = async (shouldBeOnline: boolean) => {
+    try {
+      const now = Date.now();
+      if (shouldBeOnline !== isCurrentlyOnline || now - lastActivity > 120000) {
         await supabase
           .from('profiles')
           .update({
-            is_online: true,
-            last_seen: new Date().toISOString()
+            is_online: shouldBeOnline,
+            last_seen: new Date().toISOString(),
           })
           .eq('id', currentUserId);
-      } catch (err) {
-        console.error('Update online status error:', err);
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: 'user_presence',
+              userId: currentUserId,
+              isOnline: shouldBeOnline,
+              timestamp: new Date().toISOString(),
+              broadcast: true,
+            })
+          );
+        }
+
+        isCurrentlyOnline = shouldBeOnline;
       }
-    };
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        updateOnlineStatus();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Initial status update
-    if (currentUserId) {
-      updateOnlineStatus();
+    } catch (err) {
+      console.error('Failed to update presence status:', err);
     }
+  };
+
+  // ✅ FIXED: Use `const` because assigned only once → satisfies ESLint
+  const presenceInterval = setInterval(() => {
+    const inactiveTime = Date.now() - lastActivity;
+    const shouldBeOnline = inactiveTime < 60000; // 1 minute threshold
+
+    if (shouldBeOnline !== isCurrentlyOnline) {
+      updatePresenceStatus(shouldBeOnline);
+    }
+  }, 30000);
+
+  // Initial update
+  updatePresenceStatus(true);
+
+  return () => {
+    ACTIVITY_EVENTS.forEach(event =>
+      document.removeEventListener(event, handleActivity)
+    );
+    clearInterval(presenceInterval); // ✅ Works with `const`
+    updatePresenceStatus(false);
+  };
+}, [currentUserId, supabase, wsRef]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      processOfflineQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast('You are offline. Messages will be sent when connection is restored.', {
+        duration: 5000,
+        icon: '⚠️'
+      });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
-  }, [currentUserId, supabase]);
-
+  }, []);
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -384,7 +412,7 @@ export default function MessagesPage() {
       wsRef.current.close();
     }
 
- const wsUrl = `wss://livekit.survivingdeathloss.site/notify?userId=${currentUserId}`;
+    const wsUrl = `wss://livekit.survivingdeathloss.site/notify?userId=${currentUserId}`;
     const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
@@ -870,60 +898,48 @@ export default function MessagesPage() {
 
 
   const openConversation = async (conv: ConversationSummary) => {
-    if (!currentUserId) return;
+  if (!currentUserId) return;
+  
+  setSelectedConversation(conv);
+  setMessages([]); // clear optimistic old data
+  setIsMessagesLoading(true); // 👈 start loading
+  setReplyingTo(null);
+  setShowConversationMenu(null);
 
-    setSelectedConversation(conv);
-    setMessages([]);
-    setReplyingTo(null);
-    setShowConversationMenu(null);
+  if (isMobileView) {
+    setShowChatView(true);
+  }
 
-    if (isMobileView) {
-      setShowChatView(true);
-    }
-
-    try {
-      // Get all messages, including those marked as deleted
-      const { data: allMessages, error: msgError } = await supabase
-        .from('messages')
-        .select(`
+  try {
+    const { data: allMessages, error: msgError } = await supabase
+      .from('messages')
+      .select(`
         *,
-        sender:sender_id (
-          full_name,
-          avatar_url
-        )
+        sender:sender_id (full_name, avatar_url)
       `)
-        .eq('conversation_id', conv.id)
-        .order('created_at', { ascending: true });
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: true });
 
-      if (msgError) throw msgError;
+    if (msgError) throw msgError;
 
-      // Filter messages based on deletion status
-      const filteredMessages = (allMessages || []).filter(msg => {
-        // If message is deleted for everyone, always show it as tombstone
-        if (msg.deleted_for_everyone) {
-          return true;
-        }
+    const filteredMessages = (allMessages || []).filter(msg => {
+      if (msg.deleted_for_everyone) return true;
+      if (msg.deleted_for_me?.includes(currentUserId)) return false;
+      return true;
+    });
 
-        // If message is deleted for me, hide it
-        if (msg.deleted_for_me?.includes(currentUserId)) {
-          return false;
-        }
+    setMessages(filteredMessages);
 
-        return true;
-      });
-
-      setMessages(filteredMessages);
-
-      // ✅ Mark as read if there are unread messages
-      if (conv.unread_count && conv.unread_count > 0) {
-        markConversationAsRead(conv.id);
-      }
-    } catch (err) {
-      console.error('Error loading messages:', err);
-      toast.error('Failed to load conversation');
+    if (conv.unread_count && conv.unread_count > 0) {
+      markConversationAsRead(conv.id);
     }
-  };
-
+  } catch (err) {
+    console.error('Error loading messages:', err);
+    toast.error('Failed to load conversation');
+  } finally {
+    setIsMessagesLoading(false); // 👈 done
+  }
+};
   const handleStartNewConversation = useCallback(async (userId: string) => {
     if (!currentUserId) return;
     setIsOpen(false);
@@ -1007,7 +1023,6 @@ export default function MessagesPage() {
     setNewMessage('');
     setIsSending(true);
     setReplyingTo(null);
-
     const tempId = `temp-${Date.now()}`;
     const now = new Date().toISOString();
 
@@ -1025,8 +1040,20 @@ export default function MessagesPage() {
 
     setMessages(prev => [...prev, optimisticMessage]);
 
+    // If offline, queue the message
+    if (!isOnline || !wsConnected) {
+      setOfflineMessageQueue(prev => [...prev, {
+        tempId,
+        content,
+        conversationId: selectedConversation.id,
+        replyTo: replyingTo?.id || null,
+      }]);
+      setIsSending(false);
+      return;
+    }
+
+    // Send immediately when online
     try {
-      // Save message to database
       const { data: inserted, error: dbError } = await supabase
         .from('messages')
         .insert({
@@ -1036,12 +1063,12 @@ export default function MessagesPage() {
           reply_to: replyingTo?.id || null,
         })
         .select(`
-        *,
-        sender:sender_id (
-          full_name,
-          avatar_url
-        )
-      `)
+*,
+sender:sender_id (
+full_name,
+avatar_url
+)
+`)
         .single();
 
       if (dbError) throw dbError;
@@ -1051,18 +1078,17 @@ export default function MessagesPage() {
         msg.id === tempId ? inserted : msg
       ));
 
-      // Update conversations list with latest message
+      // Update conversations list
       const updatedConv = {
         id: selectedConversation.id,
         last_message: content,
         last_message_at: now
       };
-
       setConversations(prev => prev.map(conv =>
         conv.id === selectedConversation.id ? { ...conv, ...updatedConv } : conv
       ));
 
-      // Send real-time notification to the recipient
+      // Send real-time notification
       await sendNotification({
         type: 'new_message',
         toUserId: selectedConversation.other_user_id,
@@ -1076,14 +1102,80 @@ export default function MessagesPage() {
       toast.success('Message sent!');
     } catch (err) {
       console.error('Send failed:', err);
-      toast.error('Message failed to send');
-      setMessages(prev => prev.filter(msg => msg.id !== tempId));
-      setNewMessage(content);
+      // Queue failed message
+      setOfflineMessageQueue(prev => [...prev, {
+        tempId,
+        content,
+        conversationId: selectedConversation.id,
+        replyTo: replyingTo?.id || null,
+      }]);
+      toast.error('Message queued for sending');
     } finally {
       setIsSending(false);
     }
   };
 
+  const processOfflineQueue = async () => {
+    if (offlineMessageQueue.length === 0 || !isOnline || !wsConnected) return;
+
+    toast.loading('Sending queued messages...', { id: 'queue-process' });
+
+    // Process sequentially to maintain order
+    for (const message of [...offlineMessageQueue]) {
+      try {
+        const { data: inserted, error: dbError } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: message.conversationId,
+            sender_id: currentUserId!,
+            content: message.content,
+            reply_to: message.replyTo || null,
+            file_url: message.fileUrl || null,
+            file_type: message.fileType || null,
+          })
+          .select(`
+*,
+sender:sender_id (
+full_name,
+avatar_url
+)
+`)
+          .single();
+
+        if (dbError) throw dbError;
+
+        // Update local state
+        setMessages(prev => prev.map(msg =>
+          msg.id === message.tempId ? inserted : msg
+        ));
+
+        // Send notification if it's the active conversation
+        const conv = conversations.find(c => c.id === message.conversationId);
+        if (conv && selectedConversation?.id === conv.id) {
+          await sendNotification({
+            type: 'new_message',
+            toUserId: conv.other_user_id,
+            conversationId: message.conversationId,
+            messageId: inserted.id,
+            content: inserted.content,
+            senderId: currentUserId!,
+            timestamp: inserted.created_at
+          });
+        }
+
+        // Remove from queue
+        setOfflineMessageQueue(prev => prev.filter(q => q.tempId !== message.tempId));
+      } catch (err) {
+        console.error('Failed to send queued message:', err);
+        // Keep in queue to retry later
+        break; // Stop processing on first failure
+      }
+    }
+
+    if (offlineMessageQueue.length === 0) {
+      toast.success('All queued messages sent!', { id: 'queue-process' });
+    }
+  };
   const loadMessagesForConversation = async (conversationId: string) => {
     if (!currentUserId) return;
 
@@ -1553,19 +1645,25 @@ export default function MessagesPage() {
           gap: '12px',
           backgroundColor: '#f9fafb'
         }}>
-          {messages.length === 0 ? (
-            <div style={{
-              textAlign: 'center',
-              color: '#94a3b8',
-              marginTop: '40px'
-            }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.4 }}>🕊️</div>
-              <p>
-                This conversation is new.<br />
-                Be the first to share.
-              </p>
-            </div>
-          ) : (
+        {isMessagesLoading ? (
+  <div style={{
+    textAlign: 'center',
+    color: '#94a3b8',
+    marginTop: '40px'
+  }}>
+    <div style={{ fontSize: '24px', marginBottom: '12px' }}>⏳</div>
+    Loading messages...
+  </div>
+) : messages.length === 0 ? (
+  <div style={{
+    textAlign: 'center',
+    color: '#94a3b8',
+    marginTop: '40px'
+  }}>
+    <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.4 }}>🕊️</div>
+    <p>This conversation is new.<br />Be the first to share.</p>
+  </div>
+) : (
             <>
               {messages.map(msg => {
                 const isOwn = msg.sender_id === currentUserId;

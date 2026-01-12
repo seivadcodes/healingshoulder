@@ -1,4 +1,3 @@
-// src/app/auth/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -6,6 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 
 const EMAIL_STORAGE_KEY = 'auth.email';
+
+type CountryInfo = {
+  country: string; // e.g., "KE", "US", "GB"
+};
 
 export default function AuthPage() {
   const { user, loading, signIn, signUp } = useAuth();
@@ -17,6 +20,7 @@ export default function AuthPage() {
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [userCountry, setUserCountry] = useState<string | null>(null);
 
   // Redirect if authenticated
   useEffect(() => {
@@ -36,6 +40,22 @@ export default function AuthPage() {
       }
     }
   }, [loading]);
+
+  // Fetch user's country on mount (non-blocking)
+  useEffect(() => {
+    const fetchCountry = async () => {
+      try {
+        const res = await fetch('/api/country');
+        if (!res.ok) throw new Error('Failed to fetch country');
+        const data: CountryInfo = await res.json();
+        setUserCountry(data.country);
+      } catch {
+  console.warn('Could not detect country, proceeding without it');
+}
+    };
+
+    fetchCountry();
+  }, []);
 
   const handleEmailChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -57,7 +77,7 @@ export default function AuthPage() {
         if (!fullName.trim()) {
           throw new Error('Please enter your name.');
         }
-        await signUp(email, password, fullName.trim());
+        await signUp(email, password, fullName.trim(), userCountry);
       }
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -69,7 +89,6 @@ export default function AuthPage() {
     }
   };
 
-  // Show loading only while initial auth session is being checked
   if (loading) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center', fontSize: '1.1rem' }}>
@@ -78,8 +97,6 @@ export default function AuthPage() {
     );
   }
 
-  // If user is authenticated (and loading is done), redirect has been triggered.
-  // Returning null here is safe and brief — no need to render anything.
   if (user) {
     return null;
   }
@@ -202,6 +219,17 @@ export default function AuthPage() {
           ? "Don't have an account? Sign up"
           : 'Already have an account? Sign in'}
       </button>
+      
+      {authMode === 'sign-up' && (
+        <p style={{ 
+          marginTop: '1rem', 
+          fontSize: '0.85rem', 
+          color: '#666',
+          fontStyle: 'italic'
+        }}>
+          We detect your country to personalize your experience 
+        </p>
+      )}
     </div>
   );
 }

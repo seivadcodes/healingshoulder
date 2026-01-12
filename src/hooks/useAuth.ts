@@ -1,4 +1,3 @@
-// src/hooks/useAuth.ts
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -6,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase';
 
-// Helper to ensure profile exists and has full_name + last_seen
+// Helper to ensure profile exists and has full_name + last_seen + country
 async function ensureProfileExists(user: User) {
   if (!user?.id) return;
 
@@ -20,22 +19,26 @@ async function ensureProfileExists(user: User) {
 
   const now = new Date().toISOString();
   const metadata = user.user_metadata;
+
   const fullName =
     (typeof metadata?.full_name === 'string' ? metadata.full_name : null) ||
     user.email?.split('@')[0] ||
     'Friend';
 
+  // ✅ Extract country from auth metadata (set during signUp)
+  const country = typeof metadata?.country === 'string' ? metadata.country : null;
+
   if (fetchError?.code === 'PGRST116') {
-    // Profile doesn't exist → create it with last_seen
+    // Profile doesn't exist → create it with country and last_seen
     const { error: insertError } = await supabase
       .from('profiles')
       .insert({
         id: user.id,
         email: user.email,
         full_name: fullName,
-        last_seen: now, // ✅ Set on signup
+        country, // ✅ Preserve detected country
+        last_seen: now,
         created_at: now,
-        // Add default values for other required fields if needed
         grief_types: [],
         accepts_calls: true,
         accepts_video_calls: false,
@@ -49,7 +52,7 @@ async function ensureProfileExists(user: User) {
       console.error('Failed to create profile:', insertError);
     }
   } else if (existingProfile) {
-    // Profile exists → update last_seen on every auth event
+    // Profile exists → only update last_seen (do NOT overwrite country or name)
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ last_seen: now })
@@ -77,14 +80,23 @@ export function useAuth() {
     return data;
   }, []);
 
+  // ✅ Updated: Accepts optional country parameter
   const signUp = useCallback(
-    async (email: string, password: string, fullName?: string) => {
+    async (
+      email: string,
+      password: string,
+      fullName?: string,
+      country?: string | null
+    ) => {
       const supabase = createClient();
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { full_name: fullName },
+          data: {
+            full_name: fullName,
+            country: country || null, // ✅ Pass detected country
+          },
           emailRedirectTo: typeof window !== 'undefined'
             ? `${window.location.origin}/auth/callback`
             : undefined,
@@ -137,7 +149,7 @@ export function useAuth() {
       }
 
       if (isSubscribed && session?.user) {
-        ensureProfileExists(session.user); // ✅ Updates last_seen
+        ensureProfileExists(session.user);
         setUser(session.user);
       } else if (isSubscribed) {
         setUser(null);
@@ -165,9 +177,13 @@ export function useAuth() {
         ) {
           router.push('/auth');
         }
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      } else if (
+        event === 'SIGNED_IN' ||
+        event === 'TOKEN_REFRESHED' ||
+        event === 'USER_UPDATED'
+      ) {
         if (session?.user) {
-          ensureProfileExists(session.user); // ✅ Always refresh last_seen on auth events
+          ensureProfileExists(session.user);
           setUser(session.user);
         }
         setLoading(false);
