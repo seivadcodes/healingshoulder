@@ -13,8 +13,8 @@ import {
     ChevronDown,
     ChevronUp,
     CornerDownLeft,
-    ImageIcon,
-    X
+
+
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Image from 'next/image';
@@ -34,12 +34,22 @@ export type GriefType =
 
 export interface PostAuthor {
     id: string;
-    fullName: string;
+    fullName: string | null;
     avatarUrl: string | null;
     isAnonymous?: boolean;
     lastOnline?: string | null;
 }
-
+interface RawComment {
+    id: string;
+    content: string;
+    created_at: string; // ISO date string from Supabase
+    user_id: string;
+    is_anonymous: boolean;
+    username?: string | null;
+    avatar_url?: string | null;
+    post_id: string;
+    parent_comment_id: string | null;
+}
 export interface CommentNode {
     id: string;
     content: string;
@@ -99,12 +109,6 @@ function formatRecentActivity(date: Date | string): string {
     return years === 1 ? '1 year ago' : `${years} years ago`;
 }
 
-const isUserOnline = (lastOnline: string | null): boolean => {
-    if (!lastOnline) return false;
-    const lastOnlineDate = new Date(lastOnline);
-    const now = new Date();
-    return now.getTime() - lastOnlineDate.getTime() < 5 * 60 * 1000;
-};
 
 // ─── 3. STYLES ───────────────────────────────────────
 const baseColors = {
@@ -162,23 +166,14 @@ const buttonStyle = (bg: string, color = 'white') => ({
     transition: 'background 0.2s',
 });
 
-const outlineButtonStyle = {
-    background: 'transparent',
-    color: baseColors.text.primary,
-    border: `1px solid ${baseColors.border}`,
-    padding: `${spacing.sm} ${spacing.lg}`,
-    borderRadius: borderRadius.md,
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: spacing.sm,
-};
+
 
 const cardStyle: React.CSSProperties = {
     background: baseColors.surface,
     borderRadius: borderRadius.lg,
     border: `1px solid ${baseColors.border}`,
     padding: spacing.xl,
+    paddingBottom: '6rem',
     boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
     marginBottom: spacing.md,
 };
@@ -226,10 +221,8 @@ export function PostCard({
     const [authUsername, setAuthUsername] = useState('');
     const [isModerator, setIsModerator] = useState(false);
 
-    const isCommunity = context === 'community';
-    const commentTable = isCommunity ? 'community_post_comments' : 'post_comments';
-    const commentView = isCommunity ? 'community_post_comments_with_profiles' : 'post_comments_with_profiles';
-    const likeTarget = isCommunity ? 'community_posts' : 'posts';
+
+    const [commentsCount, setCommentsCount] = useState(post.commentsCount);
 
     // Get gradient based on grief type
     const gradient = useMemo(() => {
@@ -250,13 +243,13 @@ export function PostCard({
     // Fetch comments when needed
     const fetchComments = useCallback(async () => {
         if (!post.id || !showAllComments) return;
-
         setCommentLoading(true);
         try {
             const commentView = context === 'profile'
                 ? 'post_comments_with_profiles'
                 : 'community_post_comments_with_profiles';
 
+            // 1. Fetch all comments for this post
             const { data: allComments, error: commentsError } = await supabase
                 .from(commentView)
                 .select('*')
@@ -265,7 +258,7 @@ export function PostCard({
 
             if (commentsError) throw commentsError;
 
-            const formattedComments = allComments.map((comment: any) => ({
+            const formattedComments = allComments.map((comment: RawComment) => ({
                 id: comment.id,
                 content: comment.content,
                 createdAt: new Date(comment.created_at),
@@ -275,8 +268,17 @@ export function PostCard({
                 postId: comment.post_id,
                 parentCommentId: comment.parent_comment_id ?? null,
             }));
-
-            const buildCommentTree = (comments: any[], parentId: string | null = null): CommentNode[] => {
+            // 2. Build nested comment tree
+            const buildCommentTree = (comments: {
+                id: string;
+                content: string;
+                createdAt: Date;
+                userId: string;
+                username: string;
+                avatarUrl: string | null;
+                postId: string;
+                parentCommentId: string | null;
+            }[], parentId: string | null = null): CommentNode[] => {
                 return comments
                     .filter((comment) => comment.parentCommentId === parentId)
                     .map((comment): CommentNode => {
@@ -291,13 +293,28 @@ export function PostCard({
 
             const nestedComments = buildCommentTree(formattedComments);
             setComments(nestedComments);
+
+
+            // ✅ 3. FETCH THE REAL COMMENT COUNT FROM DATABASE
+            const commentTable = context === 'profile'
+                ? 'post_comments'
+                : 'community_post_comments';
+
+            const { count, error: countError } = await supabase
+                .from(commentTable)
+                .select('*', { count: 'exact', head: true })
+                .eq('post_id', post.id);
+
+            if (!countError && count !== null) {
+                setCommentsCount(count);
+            }
         } catch (error) {
             console.error('Error fetching comments:', error);
             toast.error('Failed to load comments');
         } finally {
             setCommentLoading(false);
         }
-    }, [post.id, showAllComments, supabase, context]); // 👈 note: added `context` to deps
+    }, [post.id, showAllComments, supabase, context]);
 
     useEffect(() => {
         if (showAllComments && comments.length === 0) {
@@ -320,6 +337,103 @@ export function PostCard({
 
         checkLikeStatus();
     }, [user, post.id, readonly]);
+
+    useEffect(() => {
+        const fetchRealLikeCount = async () => {
+            if (!post.id) return;
+            try {
+                const { count, error } = await supabase
+                    .from('post_hearts') // or whatever your like/heart table is named
+                    .select('*', { count: 'exact', head: true })
+                    .eq('post_id', post.id);
+
+                if (!error && count !== null) {
+                    setLikesCount(count);
+                }
+            } catch (err) {
+                console.error('Failed to fetch real like count:', err);
+            }
+        };
+
+        fetchRealLikeCount();
+    }, [post.id, supabase]);
+
+
+    useEffect(() => {
+        if (!post.id) return;
+
+        const channel = supabase
+            .channel(`post-hearts-${post.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'post_hearts', // 👈 adjust if different
+                    filter: `post_id=eq.${post.id}`,
+                },
+                (payload) => {
+                    // Re-fetch the count whenever a heart is added/removed
+                    supabase
+                        .from('post_hearts')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('post_id', post.id)
+                        .then(({ count, error }) => {
+                            if (!error && count !== null) {
+                                setLikesCount(count);
+                                // Optionally update isLiked status for current user too
+                            }
+                        });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [post.id, supabase]);
+
+    useEffect(() => {
+  if (!post.id) return;
+
+  const channel = supabase
+    .channel(`post-${post.id}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'posts',
+        filter: `id=eq.${post.id}`,
+      },
+      (payload) => {
+        const updatedPost = payload.new as { likes_count: number };
+        setLikesCount(updatedPost.likes_count);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [post.id, supabase]);
+
+    useEffect(() => {
+        const fetchRealCommentCount = async () => {
+            const commentTable = context === 'profile'
+                ? 'post_comments'
+                : 'community_post_comments';
+            const { count, error } = await supabase
+                .from(commentTable)
+                .select('*', { count: 'exact', head: true })
+                .eq('post_id', post.id);
+            if (!error && count !== null) {
+                setCommentsCount(count);
+            }
+        };
+
+        fetchRealCommentCount();
+    }, [post.id, context, supabase]);
 
     const handleToggleLike = async () => {
         if (readonly || !user) {
@@ -400,7 +514,7 @@ export function PostCard({
             }
 
             // Update comment count
-            post.commentsCount += 1;
+            setCommentsCount(prev => prev + 1);
 
             setNewCommentContent('');
             toast.success('Comment added successfully');
@@ -483,7 +597,7 @@ export function PostCard({
 
             setComments((prev) => (prev ? updateCommentsState(prev) : [newReply]));
 
-            post.commentsCount += 1;
+            setCommentsCount(prev => prev + 1);
 
             setReplyContent((prev) => ({ ...prev, [parentCommentId]: '' }));
             setReplyingToComment((prev) => ({ ...prev, [parentCommentId]: false }));
@@ -521,12 +635,12 @@ export function PostCard({
 
             const getDescendantIds = (parentId: string): string[] => {
                 const directChildren = allComments.filter(
-                    (c: any) => c.parent_comment_id === parentId
+                    (c: { id: string; parent_comment_id: string | null }) => c.parent_comment_id === parentId
                 );
                 return [
-                    ...directChildren.map((c: any) => c.id),
-                    ...directChildren.flatMap((c: any) => getDescendantIds(c.id)),
-                ];
+                    ...directChildren.map((c: { id: string }) => c.id),
+                    ...directChildren.flatMap((c: { id: string }) => getDescendantIds(c.id)),
+                ]; // ✅ Closed the array with `]`, then function closes with `}`
             };
 
             const descendantIds = getDescendantIds(commentId);
@@ -554,8 +668,7 @@ export function PostCard({
 
             setComments((prev) => (prev ? removeCommentAndDescendants(prev) : []));
 
-            post.commentsCount = Math.max(0, post.commentsCount - totalCommentsToDelete);
-
+            setCommentsCount(prev => Math.max(0, prev - totalCommentsToDelete));
             if (expandedComments[commentId]) {
                 setExpandedComments((prev) => {
                     const newExpanded = { ...prev };
@@ -1034,7 +1147,7 @@ export function PostCard({
                     ) : (
                         <MessageCircle size={16} />
                     )}
-                    {post.commentsCount}
+                    {commentsCount}
                 </button>
             </div>
 
@@ -1043,7 +1156,7 @@ export function PostCard({
                 marginTop: spacing.lg,
                 paddingTop: spacing.lg,
                 borderTop: `1px solid ${baseColors.border}`,
-                display: showAllComments || post.commentsCount > 0 ? 'block' : 'none'
+                display: showAllComments || commentsCount > 0 ? 'block' : 'none'
             }}>
                 {/* Loading comments */}
                 {commentLoading && showAllComments && (
@@ -1061,7 +1174,7 @@ export function PostCard({
                 )}
 
                 {/* No comments message */}
-                {!commentLoading && showAllComments && comments.length === 0 && post.commentsCount === 0 && (
+                {!commentLoading && showAllComments && comments.length === 0 && commentsCount === 0 && (
                     <p style={{ color: baseColors.text.muted, textAlign: 'center', padding: spacing.md }}>
                         No comments yet. Be the first to comment!
                     </p>
@@ -1075,7 +1188,7 @@ export function PostCard({
                 ))}
 
                 {/* Toggle comments button */}
-                {(post.commentsCount > (showAllComments ? comments.length : 0)) && (
+                {(commentsCount > (showAllComments ? comments.length : 0)) && (
                     <button
                         onClick={toggleComments}
                         style={{
@@ -1098,7 +1211,7 @@ export function PostCard({
                         ) : (
                             <>
                                 <ChevronDown size={16} />
-                                View all {post.commentsCount} comments
+                                View all {commentsCount} comments
                             </>
                         )}
                     </button>

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase';
 import { PostCard } from '@/components/PostCard';
 import { GriefType } from '@/app/dashboard/useDashboardLogic';
 import { useAuth } from '@/hooks/useAuth';
+import Image from 'next/image';
 
 const griefLabels: Record<string, string> = {
   parent: 'Loss of a Parent',
@@ -29,90 +30,114 @@ interface Profile {
   avatar_url: string | null;
 }
 
+// 🔧 FIXED: `user` is now optional (`?`) and can be `undefined` (not `null`)
+interface Post {
+  id: string;
+  userId: string;
+  text: string;
+  mediaUrl: string | null;
+  mediaUrls?: string[];
+  griefTypes: GriefType[];
+  createdAt: Date;
+  likes: number;
+  isLiked: boolean;
+  commentsCount: number;
+  isAnonymous: boolean;
+  user?: { // 👈 changed from `| null` to optional (`?`) → allows `undefined`
+    id: string;
+    fullName: string | null;
+    avatarUrl: string | null;
+    isAnonymous: boolean;
+  };
+}
+
 export default function PublicProfile() {
   const { id } = useParams<{ id: string }>();
-  const supabase = createClient();
+ 
   const { user } = useAuth();
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [posts, setPosts] = useState<any[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchProfileAndPosts = async () => {
-      if (!id) return;
+  if (!id) return;
 
-      try {
-        setLoading(true);
-        setError(null);
+  const supabase = createClient(); // ✅ Moved inside useEffect
 
-        // 1. Fetch profile
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', id)
-          .single();
+  const fetchProfileAndPosts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-        if (profileError || !profileData) {
-          setError('Profile not found');
-          return;
-        }
+      // Fetch profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-        setProfile(profileData);
-
-        // 2. Fetch PUBLIC (non-anonymous) posts by this user
-        const { data: postData, error: postError } = await supabase
-          .from('posts')
-          .select(`
-            *,
-            profiles: user_id (
-              full_name,
-              avatar_url,
-              is_anonymous
-            )
-          `)
-          .eq('user_id', id)
-          .eq('is_anonymous', false) // 🔒 Only public posts
-          .order('created_at', { ascending: false });
-
-        if (postError) {
-          console.error('Failed to load posts:', postError);
-          // Don't throw — just show profile without posts
-        }
-
-        // 3. Map to PostCard-compatible format
-        const mappedPosts = (postData || []).map((p: any) => ({
-          id: p.id,
-          userId: p.user_id,
-          text: p.text,
-          mediaUrl: p.media_url || null, // Updated to match new PostCard
-          mediaUrls: p.media_urls || undefined,
-          griefTypes: p.grief_types as GriefType[],
-          createdAt: new Date(p.created_at),
-          likes: p.likes_count || 0,
-          isLiked: false, // Will be handled by PostCard's internal logic
-          commentsCount: p.comments_count || 0,
-          isAnonymous: false, // Guaranteed by filter
-          user: p.profiles ? {
-            id: p.profiles.id,
-            fullName: p.profiles.full_name,
-            avatarUrl: p.profiles.avatar_url,
-            isAnonymous: false,
-          } : null,
-        }));
-
-        setPosts(mappedPosts);
-      } catch (err) {
-        console.error('Profile fetch failed:', err);
-        setError('Failed to load profile');
-      } finally {
-        setLoading(false);
+      if (profileError || !profileData) {
+        setError('Profile not found');
+        return;
       }
-    };
 
-    fetchProfileAndPosts();
-  }, [id, user]);
+      setProfile(profileData);
+
+      // Fetch posts
+      const { data: postData, error: postError } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles: user_id (
+            id,
+            full_name,
+            avatar_url,
+            is_anonymous
+          )
+        `)
+        .eq('user_id', id)
+        .eq('is_anonymous', false)
+        .order('created_at', { ascending: false });
+
+      if (postError) {
+        console.error('Failed to load posts:', postError);
+      }
+
+      const mappedPosts = (postData || []).map((p) => ({
+        id: p.id,
+        userId: p.user_id,
+        text: p.text,
+        mediaUrl: p.media_url || null,
+        mediaUrls: p.media_urls || undefined,
+        griefTypes: p.grief_types as GriefType[],
+        createdAt: new Date(p.created_at),
+        likes: p.likes_count || 0,
+        isLiked: false,
+        commentsCount: p.comments_count || 0,
+        isAnonymous: false,
+        user: p.profiles
+          ? {
+              id: p.profiles.id,
+              fullName: p.profiles.full_name,
+              avatarUrl: p.profiles.avatar_url,
+              isAnonymous: p.profiles.is_anonymous ?? false,
+            }
+          : undefined,
+      }));
+
+      setPosts(mappedPosts);
+    } catch (err) {
+      console.error('Profile fetch failed:', err);
+      setError('Failed to load profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchProfileAndPosts();
+}, [id, user]); // ✅ Now safe — no missing deps
 
   if (loading) {
     return (
@@ -131,13 +156,12 @@ export default function PublicProfile() {
   }
 
   const name = profile.full_name || 'Anonymous';
-  const firstName = profile.full_name ? profile.full_name.split(' ')[0] : 'Them';
+  
   const types = Array.isArray(profile.grief_types) ? profile.grief_types : [];
-  const countryName = profile.country 
-    ? new Intl.DisplayNames(['en'], { type: 'region' }).of(profile.country) || profile.country 
+  const countryName = profile.country
+    ? new Intl.DisplayNames(['en'], { type: 'region' }).of(profile.country) || profile.country
     : null;
 
-  // Determine if current user owns this profile
   const isOwner = user?.id === profile.id;
 
   return (
@@ -170,14 +194,18 @@ export default function PublicProfile() {
           }}
         >
           {profile.avatar_url ? (
-            <img
-              src={profile.avatar_url}
-              alt={name}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            name.charAt(0).toUpperCase()
-          )}
+  <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden' }}>
+    <Image
+      src={profile.avatar_url}
+      alt={name}
+      width={72}
+      height={72}
+      style={{ objectFit: 'cover' }}
+    />
+  </div>
+) : (
+  name.charAt(0).toUpperCase()
+)}
         </div>
 
         <h1 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', fontWeight: '600', color: '#1e293b' }}>
@@ -215,7 +243,7 @@ export default function PublicProfile() {
         </p>
       </div>
 
-      {/* Posts Section — FULL INTERACTIVE PostCard! */}
+      {/* Posts Section */}
       <div>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem', color: '#1e293b' }}>
           Shared Moments
@@ -232,12 +260,11 @@ export default function PublicProfile() {
                 key={post.id}
                 post={post}
                 isOwner={isOwner}
-                canDelete={isOwner} // Only owner can delete their own posts
-                showAuthor={true} // Always show author on profile (it's the profile owner)
+                canDelete={isOwner}
+                showAuthor={true}
                 context="profile"
                 onPostDeleted={() => {
-                  // Optional: Refresh posts after deletion
-                  setPosts(prev => prev.filter(p => p.id !== post.id));
+                  setPosts((prev) => prev.filter((p) => p.id !== post.id));
                 }}
               />
             ))}

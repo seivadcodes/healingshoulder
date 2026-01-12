@@ -176,6 +176,88 @@ export default function MessagesPage() {
 
 
 
+  // Add this new state
+  const [lastReadConversationId, setLastReadConversationId] = useState<string | null>(null);
+
+  // Add this effect to handle the event dispatch after render
+  useEffect(() => {
+    if (lastReadConversationId && conversations.length > 0) {
+      // Calculate total unread after state has updated
+      const totalUnread = conversations.reduce((sum, conv) =>
+        sum + (conv.unread_count || 0), 0);
+
+      // Dispatch event safely after render
+      window.dispatchEvent(new CustomEvent('unreadUpdate', { detail: totalUnread }));
+
+      // Reset the trigger
+      setLastReadConversationId(null);
+    }
+  }, [lastReadConversationId, conversations]);
+
+  const loadMessagesForConversation = useCallback(
+    async (conversationId: string) => {
+      if (!currentUserId) return;
+      try {
+        const { data: allMessages, error: msgError } = await supabase
+          .from('messages')
+          .select(`*, sender:sender_id (full_name, avatar_url)`)
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true });
+        if (msgError) throw msgError;
+        const filteredMessages = (allMessages || []).filter((msg) => {
+          if (msg.deleted_for_everyone) return true;
+          if (msg.deleted_for_me?.includes(currentUserId)) return false;
+          return true;
+        });
+        setMessages(filteredMessages);
+      } catch (err) {
+        console.error('Error loading messages:', err);
+        toast.error('Failed to load conversation');
+      }
+    },
+    [currentUserId, supabase, setMessages]
+  );
+
+  const markConversationAsRead = useCallback(
+    async (conversationId: string) => {
+      if (!currentUserId) return;
+      try {
+        const { error } = await supabase.rpc('mark_conversation_read', {
+          p_conv_id: conversationId,
+          p_user_id: currentUserId,
+        });
+        if (error) {
+          console.warn('Failed to mark conversation as read:', error);
+          return;
+        }
+        setConversations((prev) =>
+          prev.map((conv) =>
+            conv.id === conversationId ? { ...conv, unread_count: 0 } : conv
+          )
+        );
+        setLastReadConversationId(conversationId);
+      } catch (err) {
+        console.error('Unexpected error in markConversationAsRead:', err);
+      }
+    },
+    [currentUserId, supabase, setConversations, setLastReadConversationId]
+  );
+
+  const fetchConversations = useCallback(async () => {
+    if (!currentUserId) return;
+    try {
+      const { data: convData, error } = await supabase.rpc(
+        'get_user_conversations_with_unread',
+        { p_user_id: currentUserId }
+      );
+      if (error) throw error;
+      setConversations(convData || []);
+    } catch (err) {
+      console.error('Error fetching conversations:', err);
+    }
+  }, [currentUserId, supabase, setConversations]);
+
+
 
   useEffect(() => {
     console.log('MessagesPage: currentUserId =', currentUserId);
@@ -274,101 +356,80 @@ export default function MessagesPage() {
 
 
   // Update user online status on page visibility
- // ✅ Activity-aware presence tracking with proper cleanup and const usage
-useEffect(() => {
-  if (!currentUserId) return;
-
-  let lastActivity = Date.now();
-  let isCurrentlyOnline = true;
-  const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
-
-  const handleActivity = () => {
-    lastActivity = Date.now();
-    if (!isCurrentlyOnline) {
-      updatePresenceStatus(true);
-      isCurrentlyOnline = true;
-    }
-  };
-
-  ACTIVITY_EVENTS.forEach(event =>
-    document.addEventListener(event, handleActivity, { passive: true })
-  );
-
-  const updatePresenceStatus = async (shouldBeOnline: boolean) => {
-    try {
-      const now = Date.now();
-      if (shouldBeOnline !== isCurrentlyOnline || now - lastActivity > 120000) {
-        await supabase
-          .from('profiles')
-          .update({
-            is_online: shouldBeOnline,
-            last_seen: new Date().toISOString(),
-          })
-          .eq('id', currentUserId);
-
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'user_presence',
-              userId: currentUserId,
-              isOnline: shouldBeOnline,
-              timestamp: new Date().toISOString(),
-              broadcast: true,
-            })
-          );
-        }
-
-        isCurrentlyOnline = shouldBeOnline;
-      }
-    } catch (err) {
-      console.error('Failed to update presence status:', err);
-    }
-  };
-
-  // ✅ FIXED: Use `const` because assigned only once → satisfies ESLint
-  const presenceInterval = setInterval(() => {
-    const inactiveTime = Date.now() - lastActivity;
-    const shouldBeOnline = inactiveTime < 60000; // 1 minute threshold
-
-    if (shouldBeOnline !== isCurrentlyOnline) {
-      updatePresenceStatus(shouldBeOnline);
-    }
-  }, 30000);
-
-  // Initial update
-  updatePresenceStatus(true);
-
-  return () => {
-    ACTIVITY_EVENTS.forEach(event =>
-      document.removeEventListener(event, handleActivity)
-    );
-    clearInterval(presenceInterval); // ✅ Works with `const`
-    updatePresenceStatus(false);
-  };
-}, [currentUserId, supabase, wsRef]);
-
+  // ✅ Activity-aware presence tracking with proper cleanup and const usage
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      processOfflineQueue();
+    if (!currentUserId) return;
+
+    let lastActivity = Date.now();
+    let isCurrentlyOnline = true;
+    const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+
+    const handleActivity = () => {
+      lastActivity = Date.now();
+      if (!isCurrentlyOnline) {
+        updatePresenceStatus(true);
+        isCurrentlyOnline = true;
+      }
     };
 
-    const handleOffline = () => {
-      setIsOnline(false);
-      toast('You are offline. Messages will be sent when connection is restored.', {
-        duration: 5000,
-        icon: '⚠️'
-      });
+    ACTIVITY_EVENTS.forEach(event =>
+      document.addEventListener(event, handleActivity, { passive: true })
+    );
+
+    const updatePresenceStatus = async (shouldBeOnline: boolean) => {
+      try {
+        const now = Date.now();
+        if (shouldBeOnline !== isCurrentlyOnline || now - lastActivity > 120000) {
+          await supabase
+            .from('profiles')
+            .update({
+              is_online: shouldBeOnline,
+              last_seen: new Date().toISOString(),
+            })
+            .eq('id', currentUserId);
+
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: 'user_presence',
+                userId: currentUserId,
+                isOnline: shouldBeOnline,
+                timestamp: new Date().toISOString(),
+                broadcast: true,
+              })
+            );
+          }
+
+          isCurrentlyOnline = shouldBeOnline;
+        }
+      } catch (err) {
+        console.error('Failed to update presence status:', err);
+      }
     };
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    // ✅ FIXED: Use `const` because assigned only once → satisfies ESLint
+    const presenceInterval = setInterval(() => {
+      const inactiveTime = Date.now() - lastActivity;
+      const shouldBeOnline = inactiveTime < 60000; // 1 minute threshold
+
+      if (shouldBeOnline !== isCurrentlyOnline) {
+        updatePresenceStatus(shouldBeOnline);
+      }
+    }, 30000);
+
+    // Initial update
+    updatePresenceStatus(true);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      ACTIVITY_EVENTS.forEach(event =>
+        document.removeEventListener(event, handleActivity)
+      );
+      clearInterval(presenceInterval); // ✅ Works with `const`
+      updatePresenceStatus(false);
     };
-  }, []);
+  }, [currentUserId, supabase, wsRef]);
+
+
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -407,13 +468,9 @@ useEffect(() => {
   useEffect(() => {
     if (!currentUserId) return;
 
-    // Clean up any existing connection
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
+    if (wsRef.current) wsRef.current.close();
 
-    const wsUrl = `wss://livekit.survivingdeathloss.site/notify?userId=${currentUserId}`;
-    const socket = new WebSocket(wsUrl);
+    const socket = new WebSocket(`wss://livekit.survivingdeathloss.site/notify?userId=${currentUserId}`);
 
     socket.onopen = () => {
       console.log('✅ WebSocket connected');
@@ -426,36 +483,23 @@ useEffect(() => {
         console.log('📩 Received message via WS:', data);
 
         if (data.type === 'new_message' && data.conversationId) {
-          console.log(`💬 New message in conversation: ${data.conversationId}`);
-
-          // If this is the active conversation, mark as read immediately
           if (selectedConversation?.id === data.conversationId) {
             await loadMessagesForConversation(data.conversationId);
-            // Mark as read since we're actively viewing this conversation
             await markConversationAsRead(data.conversationId);
           } else {
-            // For inactive conversations, just refresh the list
             fetchConversations();
           }
           return;
         }
 
-        // Handle user presence updates
         if (data.type === 'user_presence') {
-          console.log(`👤 User presence update: ${data.userId} is ${data.isOnline ? 'online' : 'offline'}`);
-
-          // Update the conversations list with new presence data
-          setConversations(prev => prev.map(conv =>
-            conv.other_user_id === data.userId
-              ? {
-                ...conv,
-                other_user_is_online: data.isOnline,
-                other_user_last_seen: data.timestamp
-              }
-              : conv
-          ));
-
-          // If this is the currently selected conversation, update the local state too
+          setConversations((prev) =>
+            prev.map((conv) =>
+              conv.other_user_id === data.userId
+                ? { ...conv, other_user_is_online: data.isOnline, other_user_last_seen: data.timestamp }
+                : conv
+            )
+          );
           if (selectedConversation?.other_user_id === data.userId) {
             setOtherUserLastSeen(data.timestamp);
             setOtherUserPresenceLoaded(true);
@@ -463,86 +507,40 @@ useEffect(() => {
           return;
         }
 
-        // Add this inside your socket.onmessage handler
         if (data.type === 'message_reaction' && data.conversationId === selectedConversation?.id) {
-          console.log(`👍 Reaction update for message: ${data.messageId}`);
-
-          // Update local state with the reaction
-          setMessages(prev => prev.map(msg => {
-            if (msg.id !== data.messageId) return msg;
-
-            // Clone reactions to avoid mutation
-            const updatedReactions = { ...msg.reactions };
-            const totalUnread = conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
-            window.dispatchEvent(new CustomEvent('unreadUpdate', { detail: totalUnread }));
-
-            if (data.action === 'add') {
-              // Add reaction for this user
-              updatedReactions[data.userId] = [
-                ...(updatedReactions[data.userId] || []),
-                data.emoji
-              ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
-            } else if (data.action === 'remove') {
-              // Remove reaction for this user
-              if (updatedReactions[data.userId]) {
-                updatedReactions[data.userId] = updatedReactions[data.userId]
-                  .filter(emoji => emoji !== data.emoji);
-
-                // Clean up empty arrays
-                if (updatedReactions[data.userId].length === 0) {
-                  delete updatedReactions[data.userId];
+          setMessages((prev) =>
+            prev.map((msg) => {
+              if (msg.id !== data.messageId) return msg;
+              const updatedReactions = { ...msg.reactions };
+              if (data.action === 'add') {
+                updatedReactions[data.userId] = [
+                  ...(updatedReactions[data.userId] || []),
+                  data.emoji,
+                ].filter((v, i, a) => a.indexOf(v) === i);
+              } else if (data.action === 'remove') {
+                if (updatedReactions[data.userId]) {
+                  updatedReactions[data.userId] = updatedReactions[data.userId].filter(
+                    (emoji) => emoji !== data.emoji
+                  );
+                  if (updatedReactions[data.userId].length === 0) {
+                    delete updatedReactions[data.userId];
+                  }
                 }
               }
-            }
-
-            return { ...msg, reactions: updatedReactions };
-          }));
-
+              return { ...msg, reactions: updatedReactions };
+            })
+          );
           return;
         }
 
-        // Handle typing notifications
         if (data.type === 'user_typing' && data.conversationId === selectedConversation?.id) {
-          console.log(`⌨️ ${data.userId} is typing: ${data.isTyping}`);
           setIsOtherUserTyping(data.isTyping);
           return;
         }
 
-        // Handle new messages
-        if (data.type === 'new_message' && data.conversationId) {
-          console.log(`💬 New message in conversation: ${data.conversationId}`);
-          // Only fetch new messages if this is the active conversation
-          if (selectedConversation?.id === data.conversationId) {
-            await loadMessagesForConversation(data.conversationId);
-          } else {
-            // Refresh conversation list to update last message
-            fetchConversations();
-          }
-          return;
-        }
-
-        // Handle call notifications
-        if (data.type === 'incoming_call') {
-          console.log(`📞 Incoming call from ${data.callerName}`);
-          toast.success(`Incoming call from ${data.callerName}`);
-          // Handle call UI logic here
-        }
-
-        if (data.type === 'call_accepted') {
-          console.log(`✅ Call accepted for room: ${data.roomName}`);
-          // Handle call accepted logic
-        }
-
-        if (data.type === 'call_ended') {
-          console.log(`📴 Call ended for room: ${data.roomName}`);
-          // Handle call ended logic
-        }
-
+        // Handle calls...
       } catch (error) {
         console.error('Error processing WebSocket message:', error);
-        if (error instanceof Error) {
-          console.error('Error details:', error.message);
-        }
       }
     };
 
@@ -561,7 +559,14 @@ useEffect(() => {
     return () => {
       socket.close();
     };
-  }, [currentUserId, selectedConversation?.id]);
+  }, [
+    currentUserId,
+    selectedConversation?.id,
+    selectedConversation?.other_user_id, // ✅ now included
+    loadMessagesForConversation,
+    markConversationAsRead,
+    fetchConversations,
+  ]);
 
 
   useEffect(() => {
@@ -667,42 +672,72 @@ useEffect(() => {
     };
   }, [currentUserId, supabase]);
 
+   const sendNotification = useCallback(async (notification: {
+    type: string;
+    toUserId?: string;
+    conversationId?: string;
+    isTyping?: boolean;
+    userId?: string;
+    isOnline?: boolean;
+    timestamp?: string;
+    broadcast?: boolean;
+    [key: string]: unknown;
+  }) => {
+    try {
+      const response = await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notification),
+      });
+
+      if (!response.ok) {
+        let errorData;
+        const text = await response.text();
+        try {
+          errorData = JSON.parse(text);
+        } catch {
+          errorData = { error: 'Non-JSON server response', details: text.trim().substring(0, 200) };
+        }
+        console.warn('Notification API error:', errorData);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to send notification:', error);
+      return false;
+    }
+  }, []); // ✅ No dependencies → stable across renders
+
   // Handle when user starts typing
   const handleUserTyping = useCallback(() => {
     if (!selectedConversation || !currentUserId) return;
+    if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
 
-    // Clear previous debounce timer
-    if (typingDebounceRef.current) {
-      clearTimeout(typingDebounceRef.current);
-    }
-
-    // Only send typing notification after a brief pause in typing (300ms)
     typingDebounceRef.current = setTimeout(() => {
       sendNotification({
         type: 'user_typing',
         toUserId: selectedConversation.other_user_id,
         conversationId: selectedConversation.id,
         isTyping: true,
-        userId: currentUserId
+        userId: currentUserId,
       });
 
-      // Clear existing timeout for "stopped typing"
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-
-      // Set timeout to send "stopped typing" after inactivity
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         sendNotification({
           type: 'user_typing',
           toUserId: selectedConversation.other_user_id,
           conversationId: selectedConversation.id,
           isTyping: false,
-          userId: currentUserId
+          userId: currentUserId,
         });
       }, 2500);
-    }, 300); // Wait 300ms after last keystroke before sending notification
-  }, [currentUserId, selectedConversation]);
+    }, 300);
+  }, [
+    currentUserId,
+    selectedConversation,
+    sendNotification, // ✅ now included
+  ]);
 
   // Clear typing timeout when component unmounts
   useEffect(() => {
@@ -714,45 +749,7 @@ useEffect(() => {
   }, []);
 
 
-  const sendNotification = async (notification: {
-    type: string;
-    toUserId?: string;
-    conversationId?: string;
-    isTyping?: boolean;
-    userId?: string;
-    isOnline?: boolean;
-    timestamp?: string;
-    broadcast?: boolean;
-    [key: string]: unknown; // ✅ Replaces `any` — safe and lint-compliant
-  }) => {
-    try {
-      const response = await fetch('/api/notify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(notification),
-      });
-
-      if (!response.ok) {
-        // Safely extract error info even if response isn't JSON
-     let errorData;
-const text = await response.text();
-try {
-  errorData = JSON.parse(text);
-} catch {
-  errorData = { error: 'Non-JSON server response', details: text.trim().substring(0, 200) };
-}
-console.warn('Notification API error:', errorData); // 👈 Add this
-return false;
-      }
-
-      return true;
-    } catch (error) {
-  console.error('Failed to send notification:', error);
-  return false;
-}
-  };
+ 
 
 
 
@@ -854,94 +851,53 @@ return false;
     }
   };
 
-  const markConversationAsRead = async (conversationId: string) => {
-    if (!currentUserId) return;
 
-    try {
-      const { error } = await supabase.rpc('mark_conversation_read', {
-        p_conv_id: conversationId,
-        p_user_id: currentUserId,
-      });
 
-      if (error) {
-        console.warn('Failed to mark conversation as read:', error);
-        return;
-      }
-
-      // Update conversations state
-      setConversations(prev => prev.map(conv =>
-        conv.id === conversationId ? { ...conv, unread_count: 0 } : conv
-      ));
-
-      // Store the conversation ID to trigger the effect
-      setLastReadConversationId(conversationId);
-    } catch (err) {
-      console.error('Unexpected error in markConversationAsRead:', err);
-    }
-  };
-
-  // Add this new state
-  const [lastReadConversationId, setLastReadConversationId] = useState<string | null>(null);
-
-  // Add this effect to handle the event dispatch after render
-  useEffect(() => {
-    if (lastReadConversationId && conversations.length > 0) {
-      // Calculate total unread after state has updated
-      const totalUnread = conversations.reduce((sum, conv) =>
-        sum + (conv.unread_count || 0), 0);
-
-      // Dispatch event safely after render
-      window.dispatchEvent(new CustomEvent('unreadUpdate', { detail: totalUnread }));
-
-      // Reset the trigger
-      setLastReadConversationId(null);
-    }
-  }, [lastReadConversationId, conversations]);
 
 
   const openConversation = async (conv: ConversationSummary) => {
-  if (!currentUserId) return;
-  
-  setSelectedConversation(conv);
-  setMessages([]); // clear optimistic old data
-  setIsMessagesLoading(true); // 👈 start loading
-  setReplyingTo(null);
-  setShowConversationMenu(null);
+    if (!currentUserId) return;
 
-  if (isMobileView) {
-    setShowChatView(true);
-  }
+    setSelectedConversation(conv);
+    setMessages([]); // clear optimistic old data
+    setIsMessagesLoading(true); // 👈 start loading
+    setReplyingTo(null);
+    setShowConversationMenu(null);
 
-  try {
-    const { data: allMessages, error: msgError } = await supabase
-      .from('messages')
-      .select(`
+    if (isMobileView) {
+      setShowChatView(true);
+    }
+
+    try {
+      const { data: allMessages, error: msgError } = await supabase
+        .from('messages')
+        .select(`
         *,
         sender:sender_id (full_name, avatar_url)
       `)
-      .eq('conversation_id', conv.id)
-      .order('created_at', { ascending: true });
+        .eq('conversation_id', conv.id)
+        .order('created_at', { ascending: true });
 
-    if (msgError) throw msgError;
+      if (msgError) throw msgError;
 
-    const filteredMessages = (allMessages || []).filter(msg => {
-      if (msg.deleted_for_everyone) return true;
-      if (msg.deleted_for_me?.includes(currentUserId)) return false;
-      return true;
-    });
+      const filteredMessages = (allMessages || []).filter(msg => {
+        if (msg.deleted_for_everyone) return true;
+        if (msg.deleted_for_me?.includes(currentUserId)) return false;
+        return true;
+      });
 
-    setMessages(filteredMessages);
+      setMessages(filteredMessages);
 
-    if (conv.unread_count && conv.unread_count > 0) {
-      markConversationAsRead(conv.id);
+      if (conv.unread_count && conv.unread_count > 0) {
+        markConversationAsRead(conv.id);
+      }
+    } catch (err) {
+      console.error('Error loading messages:', err);
+      toast.error('Failed to load conversation');
+    } finally {
+      setIsMessagesLoading(false); // 👈 done
     }
-  } catch (err) {
-    console.error('Error loading messages:', err);
-    toast.error('Failed to load conversation');
-  } finally {
-    setIsMessagesLoading(false); // 👈 done
-  }
-};
+  };
   const handleStartNewConversation = useCallback(async (userId: string) => {
     if (!currentUserId) return;
     setIsOpen(false);
@@ -1117,12 +1073,10 @@ avatar_url
     }
   };
 
-  const processOfflineQueue = async () => {
+  const processOfflineQueue = useCallback(async () => {
     if (offlineMessageQueue.length === 0 || !isOnline || !wsConnected) return;
-
     toast.loading('Sending queued messages...', { id: 'queue-process' });
 
-    // Process sequentially to maintain order
     for (const message of [...offlineMessageQueue]) {
       try {
         const { data: inserted, error: dbError } = await supabase
@@ -1136,23 +1090,18 @@ avatar_url
             file_type: message.fileType || null,
           })
           .select(`
-*,
-sender:sender_id (
-full_name,
-avatar_url
-)
-`)
+          *,
+          sender:sender_id (full_name, avatar_url)
+        `)
           .single();
 
         if (dbError) throw dbError;
 
-        // Update local state
-        setMessages(prev => prev.map(msg =>
-          msg.id === message.tempId ? inserted : msg
-        ));
+        setMessages((prev) =>
+          prev.map((msg) => (msg.id === message.tempId ? inserted : msg))
+        );
 
-        // Send notification if it's the active conversation
-        const conv = conversations.find(c => c.id === message.conversationId);
+        const conv = conversations.find((c) => c.id === message.conversationId);
         if (conv && selectedConversation?.id === conv.id) {
           await sendNotification({
             type: 'new_message',
@@ -1161,67 +1110,57 @@ avatar_url
             messageId: inserted.id,
             content: inserted.content,
             senderId: currentUserId!,
-            timestamp: inserted.created_at
+            timestamp: inserted.created_at,
           });
         }
 
-        // Remove from queue
-        setOfflineMessageQueue(prev => prev.filter(q => q.tempId !== message.tempId));
+        setOfflineMessageQueue((prev) =>
+          prev.filter((q) => q.tempId !== message.tempId)
+        );
       } catch (err) {
         console.error('Failed to send queued message:', err);
-        // Keep in queue to retry later
-        break; // Stop processing on first failure
+        break;
       }
     }
 
     if (offlineMessageQueue.length === 0) {
       toast.success('All queued messages sent!', { id: 'queue-process' });
     }
-  };
-  const loadMessagesForConversation = async (conversationId: string) => {
-    if (!currentUserId) return;
+  }, [
+    offlineMessageQueue,
+    isOnline,
+    wsConnected,
+    currentUserId,
+    conversations,
+    selectedConversation?.id,
+    supabase,
+    sendNotification,
+    setMessages,
+    setOfflineMessageQueue,
+  ]);
 
-    try {
-      const { data: allMessages, error: msgError } = await supabase
-        .from('messages')
-        .select(`
-        *,
-        sender:sender_id (
-          full_name,
-          avatar_url
-        )
-      `)
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-
-      if (msgError) throw msgError;
-
-      // Filter messages based on deletion status
-      const filteredMessages = (allMessages || []).filter(msg => {
-        if (msg.deleted_for_everyone) return true;
-        if (msg.deleted_for_me?.includes(currentUserId)) return false;
-        return true;
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      processOfflineQueue();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast('You are offline. Messages will be sent when connection is restored.', {
+        duration: 5000,
+        icon: '⚠️',
       });
+    };
 
-      setMessages(filteredMessages);
-    } catch (err) {
-      console.error('Error loading messages:', err);
-      toast.error('Failed to load conversation');
-    }
-  };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
-  const fetchConversations = async () => {
-    if (!currentUserId) return;
-    try {
-      const { data: convData, error } = await supabase.rpc('get_user_conversations_with_unread', {
-        p_user_id: currentUserId,
-      });
-      if (error) throw error;
-      setConversations(convData || []);
-    } catch (err) {
-      console.error('Error fetching conversations:', err);
-    }
-  };
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [processOfflineQueue]); // ✅ now safe
+
 
 
   // Mark user as active
@@ -1647,25 +1586,25 @@ avatar_url
           gap: '12px',
           backgroundColor: '#f9fafb'
         }}>
-        {isMessagesLoading ? (
-  <div style={{
-    textAlign: 'center',
-    color: '#94a3b8',
-    marginTop: '40px'
-  }}>
-    <div style={{ fontSize: '24px', marginBottom: '12px' }}>⏳</div>
-    Loading messages...
-  </div>
-) : messages.length === 0 ? (
-  <div style={{
-    textAlign: 'center',
-    color: '#94a3b8',
-    marginTop: '40px'
-  }}>
-    <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.4 }}>🕊️</div>
-    <p>This conversation is new.<br />Be the first to share.</p>
-  </div>
-) : (
+          {isMessagesLoading ? (
+            <div style={{
+              textAlign: 'center',
+              color: '#94a3b8',
+              marginTop: '40px'
+            }}>
+              <div style={{ fontSize: '24px', marginBottom: '12px' }}>⏳</div>
+              Loading messages...
+            </div>
+          ) : messages.length === 0 ? (
+            <div style={{
+              textAlign: 'center',
+              color: '#94a3b8',
+              marginTop: '40px'
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.4 }}>🕊️</div>
+              <p>This conversation is new.<br />Be the first to share.</p>
+            </div>
+          ) : (
             <>
               {messages.map(msg => {
                 const isOwn = msg.sender_id === currentUserId;
