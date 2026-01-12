@@ -134,7 +134,7 @@ export default function Header() {
     if (!user?.id) return;
     if (wsRef.current) wsRef.current.close();
 
-    const wsUrl = `ws://178.128.210.229:8084/?userId=${user.id}`;
+    const wsUrl = `wss://livekit.survivingdeathloss.site/notify?userId=${user.id}`;
     const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
