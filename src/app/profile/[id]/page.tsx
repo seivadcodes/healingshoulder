@@ -1,13 +1,14 @@
 // src/app/profile/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { PostCard } from '@/components/PostCard';
 import { GriefType } from '@/app/dashboard/useDashboardLogic';
 import { useAuth } from '@/hooks/useAuth';
 import Image from 'next/image';
+import Angels from './angels';
 
 const griefLabels: Record<string, string> = {
   parent: 'Loss of a Parent',
@@ -28,9 +29,9 @@ interface Profile {
   grief_types: GriefType[];
   country: string | null;
   avatar_url: string | null;
+  about?: string | null;
 }
 
-// 🔧 FIXED: `user` is now optional (`?`) and can be `undefined` (not `null`)
 interface Post {
   id: string;
   userId: string;
@@ -43,7 +44,7 @@ interface Post {
   isLiked: boolean;
   commentsCount: number;
   isAnonymous: boolean;
-  user?: { // 👈 changed from `| null` to optional (`?`) → allows `undefined`
+  user?: {
     id: string;
     fullName: string | null;
     avatarUrl: string | null;
@@ -53,91 +54,102 @@ interface Post {
 
 export default function PublicProfile() {
   const { id } = useParams<{ id: string }>();
- 
   const { user } = useAuth();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [activeTab, setActiveTab] = useState<'posts' | 'angels'>('posts');
+
+  const checkScreenSize = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      setIsMobile(window.innerWidth < 768);
+    }
+  }, []);
 
   useEffect(() => {
-  if (!id) return;
+    checkScreenSize();
+    window.addEventListener('resize', checkScreenSize);
+    return () => window.removeEventListener('resize', checkScreenSize);
+  }, [checkScreenSize]);
 
-  const supabase = createClient(); // ✅ Moved inside useEffect
+  useEffect(() => {
+    if (!id) return;
 
-  const fetchProfileAndPosts = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    const supabase = createClient();
 
-      // Fetch profile
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', id)
-        .single();
+    const fetchProfileAndPosts = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      if (profileError || !profileData) {
-        setError('Profile not found');
-        return;
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (profileError || !profileData) {
+          setError('Profile not found');
+          return;
+        }
+
+        setProfile(profileData);
+
+        const { data: postData, error: postError } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            profiles: user_id (
+              id,
+              full_name,
+              avatar_url,
+              is_anonymous
+            )
+          `)
+          .eq('user_id', id)
+          .eq('is_anonymous', false)
+          .order('created_at', { ascending: false });
+
+        if (postError) {
+          console.error('Failed to load posts:', postError);
+        }
+
+        const mappedPosts = (postData || []).map((p) => ({
+          id: p.id,
+          userId: p.user_id,
+          text: p.text,
+          mediaUrl: p.media_url || null,
+          mediaUrls: p.media_urls || undefined,
+          griefTypes: p.grief_types as GriefType[],
+          createdAt: new Date(p.created_at),
+          likes: p.likes_count || 0,
+          isLiked: false,
+          commentsCount: p.comments_count || 0,
+          isAnonymous: false,
+          user: p.profiles
+            ? {
+                id: p.profiles.id,
+                fullName: p.profiles.full_name,
+                avatarUrl: p.profiles.avatar_url,
+                isAnonymous: p.profiles.is_anonymous ?? false,
+              }
+            : undefined,
+        }));
+
+        setPosts(mappedPosts);
+      } catch (err) {
+        console.error('Profile fetch failed:', err);
+        setError('Failed to load profile');
+      } finally {
+        setLoading(false);
       }
+    };
 
-      setProfile(profileData);
-
-      // Fetch posts
-      const { data: postData, error: postError } = await supabase
-        .from('posts')
-        .select(`
-          *,
-          profiles: user_id (
-            id,
-            full_name,
-            avatar_url,
-            is_anonymous
-          )
-        `)
-        .eq('user_id', id)
-        .eq('is_anonymous', false)
-        .order('created_at', { ascending: false });
-
-      if (postError) {
-        console.error('Failed to load posts:', postError);
-      }
-
-      const mappedPosts = (postData || []).map((p) => ({
-        id: p.id,
-        userId: p.user_id,
-        text: p.text,
-        mediaUrl: p.media_url || null,
-        mediaUrls: p.media_urls || undefined,
-        griefTypes: p.grief_types as GriefType[],
-        createdAt: new Date(p.created_at),
-        likes: p.likes_count || 0,
-        isLiked: false,
-        commentsCount: p.comments_count || 0,
-        isAnonymous: false,
-        user: p.profiles
-          ? {
-              id: p.profiles.id,
-              fullName: p.profiles.full_name,
-              avatarUrl: p.profiles.avatar_url,
-              isAnonymous: p.profiles.is_anonymous ?? false,
-            }
-          : undefined,
-      }));
-
-      setPosts(mappedPosts);
-    } catch (err) {
-      console.error('Profile fetch failed:', err);
-      setError('Failed to load profile');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  fetchProfileAndPosts();
-}, [id, user]); // ✅ Now safe — no missing deps
+    fetchProfileAndPosts();
+  }, [id, user]);
 
   if (loading) {
     return (
@@ -156,7 +168,6 @@ export default function PublicProfile() {
   }
 
   const name = profile.full_name || 'Anonymous';
-  
   const types = Array.isArray(profile.grief_types) ? profile.grief_types : [];
   const countryName = profile.country
     ? new Intl.DisplayNames(['en'], { type: 'region' }).of(profile.country) || profile.country
@@ -165,7 +176,7 @@ export default function PublicProfile() {
   const isOwner = user?.id === profile.id;
 
   return (
-    <div style={{ padding: '1rem', maxWidth: '600px', margin: '2rem auto', fontFamily: 'system-ui' }}>
+    <div style={{ padding: '1rem', maxWidth: '1200px', margin: '2rem auto', fontFamily: 'system-ui' }}>
       {/* Profile Header */}
       <div
         style={{
@@ -194,18 +205,18 @@ export default function PublicProfile() {
           }}
         >
           {profile.avatar_url ? (
-  <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden' }}>
-    <Image
-      src={profile.avatar_url}
-      alt={name}
-      width={72}
-      height={72}
-      style={{ objectFit: 'cover' }}
-    />
-  </div>
-) : (
-  name.charAt(0).toUpperCase()
-)}
+            <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden' }}>
+              <Image
+                src={profile.avatar_url}
+                alt={name}
+                width={72}
+                height={72}
+                style={{ objectFit: 'cover' }}
+              />
+            </div>
+          ) : (
+            name.charAt(0).toUpperCase()
+          )}
         </div>
 
         <h1 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', fontWeight: '600', color: '#1e293b' }}>
@@ -238,39 +249,154 @@ export default function PublicProfile() {
           </div>
         )}
 
-        <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1.25rem' }}>
+        {profile.about && (
+          <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#f8fafc', borderRadius: '8px' }}>
+            <p style={{ margin: 0, fontSize: '0.95rem', color: '#334155', lineHeight: 1.5 }}>
+              {profile.about}
+            </p>
+          </div>
+        )}
+
+        <p style={{ fontSize: '0.9rem', color: '#64748b', marginTop: '1rem' }}>
           A space to share and be heard.
         </p>
       </div>
 
-      {/* Posts Section */}
-      <div>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem', color: '#1e293b' }}>
-          Shared Moments
-        </h2>
-
-        {posts.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#64748b' }}>
-            No public posts yet.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {posts.map((post) => (
-              <PostCard
-                key={post.id}
-                post={post}
-                isOwner={isOwner}
-                canDelete={isOwner}
-                showAuthor={true}
-                context="profile"
-                onPostDeleted={() => {
-                  setPosts((prev) => prev.filter((p) => p.id !== post.id));
-                }}
-              />
-            ))}
+      {/* Responsive Content Area */}
+      {isMobile ? (
+        /* Mobile: Tabs */
+        <div style={{ width: '100%' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '1rem',
+              marginBottom: '1.5rem',
+              borderBottom: '1px solid #e2e8f0',
+              paddingBottom: '0.5rem',
+            }}
+          >
+            <button
+              onClick={() => setActiveTab('posts')}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontWeight: activeTab === 'posts' ? 'bold' : 'normal',
+                color: activeTab === 'posts' ? '#1e293b' : '#64748b',
+                cursor: 'pointer',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '4px',
+              }}
+            >
+              Shared Moments
+            </button>
+            <button
+              onClick={() => setActiveTab('angels')}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontWeight: activeTab === 'angels' ? 'bold' : 'normal',
+                color: activeTab === 'angels' ? '#1e293b' : '#64748b',
+                cursor: 'pointer',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '4px',
+              }}
+            >
+              Loved Ones
+            </button>
           </div>
-        )}
-      </div>
+
+          {activeTab === 'posts' ? (
+            <div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem', color: '#1e293b' }}>
+                Shared Moments
+              </h2>
+              {posts.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#64748b' }}>No public posts yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {posts.map((post) => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      isOwner={isOwner}
+                      canDelete={isOwner}
+                      showAuthor={true}
+                      context="profile"
+                      onPostDeleted={() => {
+                        setPosts((prev) => prev.filter((p) => p.id !== post.id));
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', color: '#1e293b' }}>
+                Loved Ones Remembered
+              </h3>
+              <Angels profileId={id} isOwner={isOwner} />
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Desktop: 60% / 40% side-by-side */
+        <div className="desktop-content">
+          <div className="posts-column">
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem', color: '#1e293b' }}>
+              Shared Moments
+            </h2>
+            {posts.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#64748b' }}>No public posts yet.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {posts.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    isOwner={isOwner}
+                    canDelete={isOwner}
+                    showAuthor={true}
+                    context="profile"
+                    onPostDeleted={() => {
+                      setPosts((prev) => prev.filter((p) => p.id !== post.id));
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="angels-column">
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', color: '#1e293b' }}>
+              Loved Ones Remembered
+            </h3>
+            <Angels profileId={id} isOwner={isOwner} />
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        .desktop-content {
+          display: flex;
+          gap: 2rem;
+          width: 100%;
+        }
+        .posts-column {
+          width: 60%;
+          min-width: 0; /* prevents overflow from long words */
+        }
+        .angels-column {
+          width: 40%;
+          min-width: 0;
+        }
+
+        @media (max-width: 767px) {
+          .desktop-content {
+            display: none;
+          }
+        }
+      `}</style>
     </div>
   );
 }

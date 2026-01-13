@@ -8,22 +8,21 @@ import {
   Users,
   BookOpen,
   Calendar,
- 
+  Home,
 } from 'lucide-react';
 
-const navItems = [
+const baseNavItems = [
   { name: 'Connect', href: '/connect', icon: UserPlus },
   { name: 'Communities', href: '/communities', icon: Users },
   { name: 'Resources', href: '/resources', icon: BookOpen },
   { name: 'Schedule', href: '/schedule', icon: Calendar },
-  // { name: 'Games', href: '/games', icon: Gamepad2 },
 ];
 
 export default function FooterNav() {
   const pathname = usePathname();
 
   // Dark blue background for footer
-  const darkBlue = '#1e3a8a'; // Tailwind blue-800 — feel free to change
+  const darkBlue = '#1e3a8a'; // Tailwind blue-800
 
   const footerStyle: React.CSSProperties = {
     position: 'fixed',
@@ -64,17 +63,30 @@ export default function FooterNav() {
     fontWeight: 500,
     transition: 'color 0.2s ease',
     padding: '0.25rem 0',
-    color: 'white', // label text is white to match dark footer
+    color: 'white',
   };
 
-  const isMd = false;
+  // Determine dashboard/home item dynamically
+  const isOnDashboard = pathname === '/dashboard';
+  const dashboardItem = {
+    name: isOnDashboard ? 'Home' : 'Dashboard',
+    href: isOnDashboard ? '/' : '/dashboard',
+    icon: Home,
+  };
+
+  // Insert dashboard as first item
+  const navItems = [dashboardItem, ...baseNavItems];
+
+  const isMd = false; // You may later replace this with a real media query hook if needed
 
   return (
     <footer style={isMd ? { ...footerStyle, ...footerStyleMd } : footerStyle}>
       <div style={isMd ? { ...navContainerStyle, ...navContainerStyleMd } : navContainerStyle}>
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive =
+            (item.href === '/' && pathname === '/') ||
+            (item.href === '/dashboard' && pathname === '/dashboard');
 
           return (
             <Link
@@ -113,7 +125,7 @@ export default function FooterNav() {
                   strokeWidth={3}
                   style={{
                     fill: isActive ? 'currentColor' : 'transparent',
-                    color: isActive ? '#3b82f6' : '#000000', // blue when active, black otherwise
+                    color: isActive ? '#3b82f6' : '#000000',
                   }}
                 />
               </div>

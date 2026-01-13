@@ -189,7 +189,7 @@ export function PostCard({
   isOwner = false,
   canDelete = false,
   readonly = false,
-  
+
   showAuthor = true,
   context = 'feed',
   onPostDeleted,
@@ -221,18 +221,18 @@ export function PostCard({
   const [authUsername, setAuthUsername] = useState('');
   const [isModerator, setIsModerator] = useState(false);
   const [latestCommentPreview, setLatestCommentPreview] = useState<CommentNode | null>(null);
-const [initialCountLoaded, setInitialCountLoaded] = useState(false);
+  const [initialCountLoaded, setInitialCountLoaded] = useState(false);
   // Add this with your other useState declarations
-const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
 
-// Get all media URLs in a unified array
-const allMediaUrls = useMemo(() => {
-  if (post.mediaUrls && post.mediaUrls.length > 0) {
-    return post.mediaUrls.filter(url => url); // Filter out any empty/null URLs
-  }
-  return post.mediaUrl ? [post.mediaUrl] : [];
-}, [post.mediaUrl, post.mediaUrls]);
-  
+  // Get all media URLs in a unified array
+  const allMediaUrls = useMemo(() => {
+    if (post.mediaUrls && post.mediaUrls.length > 0) {
+      return post.mediaUrls.filter(url => url); // Filter out any empty/null URLs
+    }
+    return post.mediaUrl ? [post.mediaUrl] : [];
+  }, [post.mediaUrl, post.mediaUrls]);
+
 
   // Gradient for avatar
   const gradient = useMemo(() => {
@@ -245,8 +245,8 @@ const allMediaUrls = useMemo(() => {
     if (currentUser) {
       setAuthUsername(
         currentUser.user_metadata?.full_name ||
-          currentUser.email?.split('@')[0] ||
-          'Anonymous'
+        currentUser.email?.split('@')[0] ||
+        'Anonymous'
       );
       setIsModerator(post.userId === currentUser.id);
     }
@@ -254,122 +254,122 @@ const allMediaUrls = useMemo(() => {
 
   // 🔁 Fetch real comment count on mount
   useEffect(() => {
-  const fetchRealCommentCount = async () => {
-    const commentTable = context === 'profile' ? 'post_comments' : 'community_post_comments';
-    const { count, error } = await supabase
-      .from(commentTable)
-      .select('*', { count: 'exact', head: true })
-      .eq('post_id', post.id);
+    const fetchRealCommentCount = async () => {
+      const commentTable = context === 'profile' ? 'post_comments' : 'community_post_comments';
+      const { count, error } = await supabase
+        .from(commentTable)
+        .select('*', { count: 'exact', head: true })
+        .eq('post_id', post.id);
 
-    if (!error && count !== null) {
-      setCommentsCount(count);
-    }
-    setInitialCountLoaded(true); // ✅ critical for stable UI
-  };
-  fetchRealCommentCount();
-}, [post.id, context, supabase]);
+      if (!error && count !== null) {
+        setCommentsCount(count);
+      }
+      setInitialCountLoaded(true); // ✅ critical for stable UI
+    };
+    fetchRealCommentCount();
+  }, [post.id, context, supabase]);
 
   // 🔁 Fetch comments when "View all" clicked
   const fetchComments = useCallback(async () => {
-  if (!post.id || !showAllComments) return;
+    if (!post.id || !showAllComments) return;
 
-  setCommentLoading(true);
-  try {
-    const commentView =
-      context === 'profile'
-        ? 'post_comments_with_profiles'
-        : 'community_post_comments_with_profiles';
+    setCommentLoading(true);
+    try {
+      const commentView =
+        context === 'profile'
+          ? 'post_comments_with_profiles'
+          : 'community_post_comments_with_profiles';
 
-    const { data: allComments, error: commentsError } = await supabase
-      .from(commentView)
-      .select('*')
-      .eq('post_id', post.id)
-      .order('created_at', { ascending: true });
+      const { data: allComments, error: commentsError } = await supabase
+        .from(commentView)
+        .select('*')
+        .eq('post_id', post.id)
+        .order('created_at', { ascending: true });
 
-    if (commentsError) throw commentsError;
+      if (commentsError) throw commentsError;
 
-    const formattedComments = allComments.map((comment: RawComment) => ({
-      id: comment.id,
-      content: comment.content,
-      createdAt: new Date(comment.created_at),
-      userId: comment.user_id,
-      username: comment.is_anonymous ? 'Anonymous' : comment.username || 'Anonymous',
-      avatarUrl: comment.is_anonymous ? null : comment.avatar_url || null,
-      postId: comment.post_id,
-      parentCommentId: comment.parent_comment_id ?? null,
-    }));
+      const formattedComments = allComments.map((comment: RawComment) => ({
+        id: comment.id,
+        content: comment.content,
+        createdAt: new Date(comment.created_at),
+        userId: comment.user_id,
+        username: comment.is_anonymous ? 'Anonymous' : comment.username || 'Anonymous',
+        avatarUrl: comment.is_anonymous ? null : comment.avatar_url || null,
+        postId: comment.post_id,
+        parentCommentId: comment.parent_comment_id ?? null,
+      }));
 
-    const buildCommentTree = (
-      comments: FlattenedComment[],
-      parentId: string | null = null
-    ): CommentNode[] => {
-      return comments
-        .filter((comment) => comment.parentCommentId === parentId)
-        .map((comment): CommentNode => {
-          const replies = buildCommentTree(comments, comment.id);
-          return {
-            ...comment,
-            replies,
-            replyCount: replies.length,
-          };
-        });
+      const buildCommentTree = (
+        comments: FlattenedComment[],
+        parentId: string | null = null
+      ): CommentNode[] => {
+        return comments
+          .filter((comment) => comment.parentCommentId === parentId)
+          .map((comment): CommentNode => {
+            const replies = buildCommentTree(comments, comment.id);
+            return {
+              ...comment,
+              replies,
+              replyCount: replies.length,
+            };
+          });
+      };
+
+      const nestedComments = buildCommentTree(formattedComments);
+      setComments(nestedComments);
+
+      // ✅ Do NOT refetch comment count here — it’s already synced via real-time listener
+      // The count is accurate thanks to the separate `useEffect` with Supabase channel
+
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+      toast.error('Failed to load comments');
+    } finally {
+      setCommentLoading(false);
+    }
+  }, [post.id, showAllComments, supabase, context]);
+  // 🔁 Fetch latest comment preview ONLY if we know there's at least one comment
+  useEffect(() => {
+    const fetchLatestComment = async () => {
+      if (!post.id || commentsCount === 0) {
+        setLatestCommentPreview(null);
+        return;
+      }
+
+      const commentView =
+        context === 'profile'
+          ? 'post_comments_with_profiles'
+          : 'community_post_comments_with_profiles';
+
+      const { data, error } = await supabase
+        .from(commentView)
+        .select('*')
+        .eq('post_id', post.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (!error && data?.[0]) {
+        const raw = data[0];
+        const comment: CommentNode = {
+          id: raw.id,
+          content: raw.content,
+          createdAt: new Date(raw.created_at),
+          userId: raw.user_id,
+          username: raw.is_anonymous ? 'Anonymous' : raw.username || 'Anonymous',
+          avatarUrl: raw.is_anonymous ? null : raw.avatar_url || null,
+          postId: raw.post_id,
+          parentCommentId: raw.parent_comment_id ?? null,
+          replies: [],
+          replyCount: 0,
+        };
+        setLatestCommentPreview(comment);
+      } else {
+        setLatestCommentPreview(null);
+      }
     };
 
-    const nestedComments = buildCommentTree(formattedComments);
-    setComments(nestedComments);
-
-    // ✅ Do NOT refetch comment count here — it’s already synced via real-time listener
-    // The count is accurate thanks to the separate `useEffect` with Supabase channel
-
-  } catch (error) {
-    console.error('Error fetching comments:', error);
-    toast.error('Failed to load comments');
-  } finally {
-    setCommentLoading(false);
-  }
-}, [post.id, showAllComments, supabase, context]);
- // 🔁 Fetch latest comment preview ONLY if we know there's at least one comment
-useEffect(() => {
-  const fetchLatestComment = async () => {
-    if (!post.id || commentsCount === 0) {
-      setLatestCommentPreview(null);
-      return;
-    }
-
-    const commentView =
-      context === 'profile'
-        ? 'post_comments_with_profiles'
-        : 'community_post_comments_with_profiles';
-
-    const { data, error } = await supabase
-      .from(commentView)
-      .select('*')
-      .eq('post_id', post.id)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (!error && data?.[0]) {
-      const raw = data[0];
-      const comment: CommentNode = {
-        id: raw.id,
-        content: raw.content,
-        createdAt: new Date(raw.created_at),
-        userId: raw.user_id,
-        username: raw.is_anonymous ? 'Anonymous' : raw.username || 'Anonymous',
-        avatarUrl: raw.is_anonymous ? null : raw.avatar_url || null,
-        postId: raw.post_id,
-        parentCommentId: raw.parent_comment_id ?? null,
-        replies: [],
-        replyCount: 0,
-      };
-      setLatestCommentPreview(comment);
-    } else {
-      setLatestCommentPreview(null);
-    }
-  };
-
-  fetchLatestComment();
-}, [post.id, context, supabase, commentsCount]); // ✅ depend on commentsCount all those errors are caused by me pasting this
+    fetchLatestComment();
+  }, [post.id, context, supabase, commentsCount]); // ✅ depend on commentsCount all those errors are caused by me pasting this
 
   // 🔁 Real-time comment count updates
   useEffect(() => {
@@ -759,73 +759,77 @@ useEffect(() => {
   };
 
   const toggleComments = () => {
-    setShowAllComments((prev) => !prev);
+    const newShowAll = !showAllComments;
+    setShowAllComments(newShowAll);
+    if (newShowAll && comments.length === 0) {
+      fetchComments(); // 👈 add this
+    }
   };
 
   const renderCommentPreview = (comment: CommentNode) => {
-  return (
-    <div style={{ display: 'flex', gap: spacing.md, marginBottom: spacing.md }}>
-      <div
-        style={{
-          width: '2rem',
-          height: '2rem',
-          borderRadius: borderRadius.full,
-          background: gradient,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          fontSize: '0.75rem',
-          fontWeight: 600,
-          color: 'white',
-        }}
-      >
-        {comment.avatarUrl ? (
-          <Image
-            src={comment.avatarUrl}
-            alt={comment.username}
-            width={32}
-            height={32}
-            style={{
-              width: '100%',
-              height: '100%',
-              borderRadius: borderRadius.full,
-              objectFit: 'cover',
-            }}
-          />
-        ) : (
-          comment.username[0]?.toUpperCase() || 'U'
-        )}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+    return (
+      <div style={{ display: 'flex', gap: spacing.md, marginBottom: spacing.md }}>
         <div
           style={{
-            background: '#f8fafc',
-            borderRadius: borderRadius.md,
-            padding: spacing.md,
+            width: '2rem',
+            height: '2rem',
+            borderRadius: borderRadius.full,
+            background: gradient,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            color: 'white',
           }}
         >
-          <h4 style={{ fontWeight: 600, color: baseColors.text.primary, fontSize: '0.875rem' }}>
-            {comment.username}
-          </h4>
-          <p style={{ color: baseColors.text.muted, fontSize: '0.75rem', marginTop: '0.125rem' }}>
-            {formatRecentActivity(comment.createdAt)}
-          </p>
-          <p
+          {comment.avatarUrl ? (
+            <Image
+              src={comment.avatarUrl}
+              alt={comment.username}
+              width={32}
+              height={32}
+              style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: borderRadius.full,
+                objectFit: 'cover',
+              }}
+            />
+          ) : (
+            comment.username[0]?.toUpperCase() || 'U'
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
             style={{
-              color: baseColors.text.primary,
-              fontSize: '0.875rem',
-              marginTop: spacing.sm,
-              whiteSpace: 'pre-line',
+              background: '#f8fafc',
+              borderRadius: borderRadius.md,
+              padding: spacing.md,
             }}
           >
-            {comment.content}
-          </p>
+            <h4 style={{ fontWeight: 600, color: baseColors.text.primary, fontSize: '0.875rem' }}>
+              {comment.username}
+            </h4>
+            <p style={{ color: baseColors.text.muted, fontSize: '0.75rem', marginTop: '0.125rem' }}>
+              {formatRecentActivity(comment.createdAt)}
+            </p>
+            <p
+              style={{
+                color: baseColors.text.primary,
+                fontSize: '0.875rem',
+                marginTop: spacing.sm,
+                whiteSpace: 'pre-line',
+              }}
+            >
+              {comment.content}
+            </p>
+          </div>
         </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
   const renderComment = (comment: CommentNode, depth = 0) => {
     const isNested = depth > 0;
@@ -1043,7 +1047,7 @@ useEffect(() => {
   }, [post]);
 
   const hasMedia = post.mediaUrl || (post.mediaUrls && post.mediaUrls.length > 0);
-  const mediaUrl = post.mediaUrl || (post.mediaUrls && post.mediaUrls[0]);
+
 
   // ─── RENDER ───────────────────────────────────────
 
@@ -1129,156 +1133,102 @@ useEffect(() => {
       </p>
 
       {/* Media Gallery */}
-{hasMedia && allMediaUrls.length > 0 && (
-  <div style={{ marginBottom: spacing.lg }}>
-    {/* Main media display */}
-    <div style={{ 
-      borderRadius: borderRadius.md,
-      overflow: 'hidden',
-      border: `1px solid ${baseColors.border}`,
-      position: 'relative'
-    }}>
-      {/* Navigation buttons (only if multiple items) */}
-      {allMediaUrls.length > 1 && (
-        <>
-          <button 
-            onClick={() => setCurrentMediaIndex(prev => 
-              prev === 0 ? allMediaUrls.length - 1 : prev - 1
-            )}
-            style={{
-              position: 'absolute',
-              left: '10px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              background: 'rgba(0,0,0,0.5)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '32px',
-              height: '32px',
-              cursor: 'pointer',
-              zIndex: 10
-            }}
-            aria-label="Previous media"
-          >
-            ←
-          </button>
-          <button 
-            onClick={() => setCurrentMediaIndex(prev => 
-              prev === allMediaUrls.length - 1 ? 0 : prev + 1
-            )}
-            style={{
-              position: 'absolute',
-              right: '10px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              background: 'rgba(0,0,0,0.5)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '32px',
-              height: '32px',
-              cursor: 'pointer',
-              zIndex: 10
-            }}
-            aria-label="Next media"
-          >
-            →
-          </button>
-          
-          {/* Counter */}
+      {hasMedia && allMediaUrls.length > 0 && (
+        <div style={{ marginBottom: spacing.lg }}>
+          {/* Main media display */}
           <div style={{
-            position: 'absolute',
-            bottom: '10px',
-            right: '10px',
-            background: 'rgba(0,0,0,0.7)',
-            color: 'white',
-            padding: '2px 8px',
-            borderRadius: '12px',
-            fontSize: '12px',
-            zIndex: 10
+            borderRadius: borderRadius.md,
+            overflow: 'hidden',
+            border: `1px solid ${baseColors.border}`,
+            position: 'relative'
           }}>
-            {currentMediaIndex + 1} / {allMediaUrls.length}
-          </div>
-        </>
-      )}
-      
-      {/* Render current media */}
-      {/\.(mp4|webm|mov)$/i.test(allMediaUrls[currentMediaIndex]) ? (
-        <video
-          src={allMediaUrls[currentMediaIndex]}
-          controls
-          style={{
-            width: '100%',
-            maxHeight: '400px',
-            objectFit: 'contain',
-          }}
-        />
-      ) : (
-        <Image
-          src={allMediaUrls[currentMediaIndex]}
-          alt={`Post media ${currentMediaIndex + 1}`}
-          width={800}
-          height={400}
-          style={{
-            width: '100%',
-            height: 'auto',
-            maxHeight: '400px',
-            objectFit: 'contain',
-          }}
-          onError={(e) => {
-            (e.target as HTMLImageElement).parentElement!.style.display = 'none';
-          }}
-        />
-      )}
-    </div>
-    
-    {/* Thumbnails for multiple items */}
-    {allMediaUrls.length > 1 && (
-      <div style={{ 
-        display: 'flex', 
-        gap: '8px', 
-        marginTop: '8px', 
-        overflowX: 'auto',
-        padding: '4px 0',
-        WebkitOverflowScrolling: 'touch'
-      }}>
-        {allMediaUrls.map((url, index) => (
-          <div 
-            key={index}
-            onClick={() => setCurrentMediaIndex(index)}
-            style={{
-              position: 'relative',
-              cursor: 'pointer',
-              opacity: currentMediaIndex === index ? 1 : 0.6,
-              transition: 'opacity 0.2s'
-            }}
-          >
-            {/\.(mp4|webm|mov)$/i.test(url) ? (
-              <div style={{
-                width: '60px',
-                height: '60px',
-                background: '#333',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white'
-              }}>
-                ▶
-              </div>
+            {/* Navigation buttons (only if multiple items) */}
+            {allMediaUrls.length > 1 && (
+              <>
+                <button
+                  onClick={() => setCurrentMediaIndex(prev =>
+                    prev === 0 ? allMediaUrls.length - 1 : prev - 1
+                  )}
+                  style={{
+                    position: 'absolute',
+                    left: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'rgba(0,0,0,0.5)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    cursor: 'pointer',
+                    zIndex: 10
+                  }}
+                  aria-label="Previous media"
+                >
+                  ←
+                </button>
+                <button
+                  onClick={() => setCurrentMediaIndex(prev =>
+                    prev === allMediaUrls.length - 1 ? 0 : prev + 1
+                  )}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'rgba(0,0,0,0.5)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    cursor: 'pointer',
+                    zIndex: 10
+                  }}
+                  aria-label="Next media"
+                >
+                  →
+                </button>
+
+                {/* Counter */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: '10px',
+                  right: '10px',
+                  background: 'rgba(0,0,0,0.7)',
+                  color: 'white',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '12px',
+                  zIndex: 10
+                }}>
+                  {currentMediaIndex + 1} / {allMediaUrls.length}
+                </div>
+              </>
+            )}
+
+            {/* Render current media */}
+            {/\.(mp4|webm|mov)$/i.test(allMediaUrls[currentMediaIndex]) ? (
+              <video
+                src={allMediaUrls[currentMediaIndex]}
+                controls
+                style={{
+                  width: '100%',
+                  maxHeight: '400px',
+                  objectFit: 'contain',
+                }}
+              />
             ) : (
               <Image
-                src={url}
-                alt={`Thumbnail ${index + 1}`}
-                width={60}
-                height={60}
+                src={allMediaUrls[currentMediaIndex]}
+                alt={`Post media ${currentMediaIndex + 1}`}
+                width={800}
+                height={400}
                 style={{
-                  width: '60px',
-                  height: '60px',
-                  objectFit: 'cover',
-                  borderRadius: '4px',
-                  border: currentMediaIndex === index ? `2px solid ${baseColors.primary}` : 'none'
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: '400px',
+                  objectFit: 'contain',
                 }}
                 onError={(e) => {
                   (e.target as HTMLImageElement).parentElement!.style.display = 'none';
@@ -1286,12 +1236,66 @@ useEffect(() => {
               />
             )}
           </div>
-        ))}
-      </div>
-    )}
-  </div>
-)}
-      
+
+          {/* Thumbnails for multiple items */}
+          {allMediaUrls.length > 1 && (
+            <div style={{
+              display: 'flex',
+              gap: '8px',
+              marginTop: '8px',
+              overflowX: 'auto',
+              padding: '4px 0',
+              WebkitOverflowScrolling: 'touch'
+            }}>
+              {allMediaUrls.map((url, index) => (
+                <div
+                  key={index}
+                  onClick={() => setCurrentMediaIndex(index)}
+                  style={{
+                    position: 'relative',
+                    cursor: 'pointer',
+                    opacity: currentMediaIndex === index ? 1 : 0.6,
+                    transition: 'opacity 0.2s'
+                  }}
+                >
+                  {/\.(mp4|webm|mov)$/i.test(url) ? (
+                    <div style={{
+                      width: '60px',
+                      height: '60px',
+                      background: '#333',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white'
+                    }}>
+                      ▶
+                    </div>
+                  ) : (
+                    <Image
+                      src={url}
+                      alt={`Thumbnail ${index + 1}`}
+                      width={60}
+                      height={60}
+                      style={{
+                        width: '60px',
+                        height: '60px',
+                        objectFit: 'cover',
+                        borderRadius: '4px',
+                        border: currentMediaIndex === index ? `2px solid ${baseColors.primary}` : 'none'
+                      }}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).parentElement!.style.display = 'none';
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
 
       {/* Actions */}
       <div
@@ -1348,81 +1352,81 @@ useEffect(() => {
       </div>
 
       {/* Comments Section */}
-<div
-  style={{
-    marginTop: spacing.lg,
-    paddingTop: spacing.lg,
-    borderTop: `1px solid ${baseColors.border}`,
-    display:
-      initialCountLoaded && (showAllComments || commentsCount > 0)
-        ? 'block'
-        : 'none',
-  }}
->
-  {commentLoading && showAllComments && (
-    <div style={{ display: 'flex', justifyContent: 'center', padding: spacing.lg }}>
       <div
         style={{
-          height: '1.5rem',
-          width: '1.5rem',
-          borderRadius: borderRadius.full,
-          border: `2px solid ${baseColors.primary}`,
-          borderTopColor: 'transparent',
-          animation: 'spin 1s linear infinite',
-          margin: '0 auto',
+          marginTop: spacing.lg,
+          paddingTop: spacing.lg,
+          borderTop: `1px solid ${baseColors.border}`,
+          display:
+            initialCountLoaded && (showAllComments || commentsCount > 0)
+              ? 'block'
+              : 'none',
         }}
-      ></div>
-    </div>
-  )}
+      >
+        {commentLoading && showAllComments && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: spacing.lg }}>
+            <div
+              style={{
+                height: '1.5rem',
+                width: '1.5rem',
+                borderRadius: borderRadius.full,
+                border: `2px solid ${baseColors.primary}`,
+                borderTopColor: 'transparent',
+                animation: 'spin 1s linear infinite',
+                margin: '0 auto',
+              }}
+            ></div>
+          </div>
+        )}
 
-  {/* Preview: Show only the latest comment when not expanded */}
-  {!commentLoading && !showAllComments && latestCommentPreview && (
-    <div>{renderCommentPreview(latestCommentPreview)}</div>
-  )}
+        {/* Preview: Show only the latest comment when not expanded */}
+        {!commentLoading && !showAllComments && latestCommentPreview && (
+          <div>{renderCommentPreview(latestCommentPreview)}</div>
+        )}
 
-  {/* Empty state when expanded */}
-  {!commentLoading && showAllComments && comments.length === 0 && commentsCount === 0 && (
-    <p style={{ color: baseColors.text.muted, textAlign: 'center', padding: spacing.md }}>
-      No comments yet. Be the first to comment!
-    </p>
-  )}
+        {/* Empty state when expanded */}
+        {!commentLoading && showAllComments && comments.length === 0 && commentsCount === 0 && (
+          <p style={{ color: baseColors.text.muted, textAlign: 'center', padding: spacing.md }}>
+            No comments yet. Be the first to comment!
+          </p>
+        )}
 
-  {/* Full comment tree when expanded */}
-  {showAllComments &&
-    comments.map((comment) => (
-      <div key={comment.id}>{renderComment(comment, 0)}</div>
-    ))}
+        {/* Full comment tree when expanded */}
+        {showAllComments &&
+          comments.map((comment) => (
+            <div key={comment.id}>{renderComment(comment, 0)}</div>
+          ))}
 
-  {/* Toggle button */}
-  {commentsCount > 0 && (
-    <button
-      onClick={toggleComments}
-      style={{
-        color: baseColors.primary,
-        background: 'none',
-        border: 'none',
-        cursor: 'pointer',
-        fontSize: '0.875rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.25rem',
-        marginTop: spacing.sm,
-      }}
-    >
-      {showAllComments ? (
-        <>
-          <ChevronUp size={16} />
-          Show less comments
-        </>
-      ) : (
-        <>
-          <ChevronDown size={16} />
-          View all {commentsCount} comments
-        </>
-      )}
-    </button>
-  )}
-</div>
+        {/* Toggle button */}
+        {commentsCount > 0 && (
+          <button
+            onClick={toggleComments}
+            style={{
+              color: baseColors.primary,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              marginTop: spacing.sm,
+            }}
+          >
+            {showAllComments ? (
+              <>
+                <ChevronUp size={16} />
+                Show less comments
+              </>
+            ) : (
+              <>
+                <ChevronDown size={16} />
+                View all {commentsCount} comments
+              </>
+            )}
+          </button>
+        )}
+      </div>
 
       {/* Comment Input */}
       {currentUser && !readonly && (
