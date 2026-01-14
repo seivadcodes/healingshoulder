@@ -70,6 +70,7 @@ export default function AngelDetailPage() {
     };
 
     fetchAngel();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]); // ✅ Safe: params.id is stable and string-like
 
   if (loading) {

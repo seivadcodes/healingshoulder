@@ -9,7 +9,7 @@ interface UserProfile {
   id: string;
   full_name: string;
   avatar_url: string | null;
-  accepts_calls?: boolean; 
+  accepts_calls?: boolean;
 }
 
 interface OneOnOneRequest {
@@ -21,6 +21,8 @@ interface OneOnOneRequest {
   room_id?: string;
   acceptor_id?: string;
   user?: UserProfile;
+  context?: string | null;
+
 }
 
 interface GroupRequest {
@@ -31,6 +33,8 @@ interface GroupRequest {
   created_at: string;
   room_id?: string;
   user?: UserProfile;
+  context?: string | null;
+
 }
 
 interface AvailableRequest extends OneOnOneRequest, GroupRequest {
@@ -41,7 +45,7 @@ const styles = {
   container: {
     minHeight: '100vh',
     background: 'linear-gradient(to bottom, #fffbeb, #f4f4f5)',
-    padding: '3rem 1rem 1.5rem', 
+    padding: '3rem 1rem 1.5rem',
   },
   maxWidth: {
     maxWidth: '56rem',
@@ -145,6 +149,11 @@ export default function ConnectPage() {
   const [isPostingOneOnOne, setIsPostingOneOnOne] = useState(false);
   const [isPostingGroup, setIsPostingGroup] = useState(false);
   const isRedirectingRef = useRef(false);
+ 
+ 
+
+  const [showContextModal, setShowContextModal] = useState<'one-on-one' | 'group' | null>(null);
+  const [tempContext, setTempContext] = useState('');
 
   const fetchActiveOneOnOne = useCallback(async (userId: string) => {
     try {
@@ -212,103 +221,111 @@ export default function ConnectPage() {
     }
   }, [router, supabase, user]);
 
- const fetchAvailableOneOnOne = useCallback(async (currentUserId: string) => {
-  try {
-    const { data: requests, error: reqError } = await supabase
-      .from('quick_connect_requests')
-      .select('id, created_at, user_id, status, expires_at')
-      .eq('status', 'available')
-      .neq('user_id', currentUserId)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: true });
-    if (reqError) throw reqError;
-
-    const userIds = requests.map((r) => r.user_id);
-    if (userIds.length === 0) {
+  const fetchAvailableOneOnOne = useCallback(async (currentUserId: string, acceptsCalls: boolean | null) => {
+    if (acceptsCalls === false) {
       setAvailableOneOnOne([]);
       return;
     }
 
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, full_name, avatar_url, accepts_calls') // ← include accepts_calls
-      .in('id', userIds);
+    try {
+      const { data: requests, error: reqError } = await supabase
+        .from('quick_connect_requests')
+        .select('id, created_at, user_id, status, expires_at, context') // ✅ added context
+        .eq('status', 'available')
+        .neq('user_id', currentUserId)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: true });
 
-    const profileMap = new Map(
-      (profiles || []).map((p) => [p.id, p])
-    );
+      if (reqError) throw reqError;
 
-    const formatted = requests
-      .map((req) => {
-        const userProfile = profileMap.get(req.user_id);
-        // Skip if user doesn't accept calls or profile missing
-        if (!userProfile || !userProfile.accepts_calls) return null;
-        return {
+      const userIds = requests.map((r) => r.user_id);
+      if (userIds.length === 0) {
+        setAvailableOneOnOne([]);
+        return;
+      }
+
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds);
+
+      const profileMap = new Map(
+        (profiles || []).map((p) => [p.id, p])
+      );
+
+      const formatted = requests
+        .map((req) => ({
           ...req,
           type: 'one-on-one' as const,
-          user: userProfile,
-        };
-      })
-      .filter(Boolean) as AvailableRequest[]; // filter out nulls
+          user: profileMap.get(req.user_id) || { id: req.user_id, full_name: 'Anonymous', avatar_url: null },
+        })) as AvailableRequest[];
 
-    setAvailableOneOnOne(formatted);
-  } catch (err) {
-    console.error('Error fetching available 1:1:', err);
-  }
-}, [supabase]);
+      setAvailableOneOnOne(formatted);
+    } catch (err) {
+      console.error('Error fetching available 1:1:', err);
+      setAvailableOneOnOne([]);
+    }
+  }, [supabase]);
 
-  const fetchAvailableGroups = useCallback(async (currentUserId: string) => {
-  try {
-    const { data: requests, error: reqError } = await supabase
-      .from('quick_group_requests')
-      .select('id, created_at, user_id, status, expires_at')
-      .eq('status', 'available')
-      .neq('user_id', currentUserId)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: true });
-    if (reqError) throw reqError;
-
-    const userIds = requests.map((r) => r.user_id);
-    if (userIds.length === 0) {
+  const fetchAvailableGroups = useCallback(async (currentUserId: string, acceptsCalls: boolean | null) => {
+    if (acceptsCalls === false) {
       setAvailableGroups([]);
       return;
     }
 
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, full_name, avatar_url, accepts_calls') // ← include accepts_calls
-      .in('id', userIds);
+    try {
+      const { data: requests, error: reqError } = await supabase
+        .from('quick_group_requests')
+        .select('id, created_at, user_id, status, expires_at, context') // ✅ added context
+        .eq('status', 'available')
+        .neq('user_id', currentUserId)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: true });
 
-    const profileMap = new Map(
-      (profiles || []).map((p) => [p.id, p])
-    );
+      if (reqError) throw reqError;
 
-    const formatted = requests
-      .map((req) => {
-        const userProfile = profileMap.get(req.user_id);
-        if (!userProfile || !userProfile.accepts_calls) return null;
-        return {
+      const userIds = requests.map((r) => r.user_id);
+      if (userIds.length === 0) {
+        setAvailableGroups([]);
+        return;
+      }
+
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds);
+
+      const profileMap = new Map(
+        (profiles || []).map((p) => [p.id, p])
+      );
+
+      const formatted = requests
+        .map((req) => ({
           ...req,
           type: 'group' as const,
-          user: userProfile,
-        };
-      })
-      .filter(Boolean) as AvailableRequest[];
+          user: profileMap.get(req.user_id) || { id: req.user_id, full_name: 'Anonymous', avatar_url: null },
+        })) as AvailableRequest[];
 
-    setAvailableGroups(formatted);
-  } catch (err) {
-    console.error('Error fetching available groups:', err);
-  }
-}, [supabase]);
+      setAvailableGroups(formatted);
+    } catch (err) {
+      console.error('Error fetching available groups:', err);
+      setAvailableGroups([]);
+    }
+  }, [supabase]);
 
   useEffect(() => {
     let isMounted = true;
     let pollInterval: NodeJS.Timeout | null = null;
 
-    const fetchAllData = async (userId: string) => {
+    const fetchAllData = async (userId: string, acceptsCalls: boolean | null) => {
+      if (acceptsCalls === false) {
+        setAvailableOneOnOne([]);
+        setAvailableGroups([]);
+        return;
+      }
       try {
-        await fetchAvailableOneOnOne(userId);
-        await fetchAvailableGroups(userId);
+        await fetchAvailableOneOnOne(userId, acceptsCalls);
+        await fetchAvailableGroups(userId, acceptsCalls);
         await fetchActiveOneOnOne(userId);
         await fetchActiveGroup(userId);
       } catch (err) {
@@ -316,15 +333,15 @@ export default function ConnectPage() {
       }
     };
 
-    const startPolling = (userId: string) => {
+    const startPolling = (userId: string, acceptsCalls: boolean | null) => {
       if (pollInterval) return;
       const poll = () => {
         if (!isRedirectingRef.current && !document.hidden && isMounted) {
-          fetchAllData(userId);
+          fetchAllData(userId, acceptsCalls);
         }
       };
       pollInterval = setInterval(poll, 8000);
-      poll();
+      poll(); // initial call
     };
 
     const initialize = async () => {
@@ -334,14 +351,20 @@ export default function ConnectPage() {
           router.push('/auth');
           return;
         }
+
+        // 🔧 Fix: remove space in 'full_name'
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('id, full_name, avatar_url')
+          .select('id, full_name, avatar_url, accepts_calls') // ✅ corrected
           .eq('id', session.user.id)
           .single();
+
         if (profileError) throw profileError;
-        if (isMounted) setUser(profile);
-        startPolling(session.user.id);
+
+        if (isMounted) {
+          setUser(profile);
+          startPolling(session.user.id, profile.accepts_calls ?? null);
+        }
       } catch (err) {
         console.error('Initialization error:', err);
         if (isMounted) setError('Failed to load connection requests');
@@ -356,125 +379,178 @@ export default function ConnectPage() {
       isMounted = false;
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [fetchActiveOneOnOne, fetchActiveGroup, fetchAvailableOneOnOne, fetchAvailableGroups, router, supabase]);
+  }, [
+    fetchActiveOneOnOne,
+    fetchActiveGroup,
+    fetchAvailableOneOnOne,
+    fetchAvailableGroups,
+    router,
+    supabase
+  ]);
 
   // === ONE-ON-ONE LOGIC ===
-  const postOneOnOne = async () => {
-    if (!user || activeOneOnOne || activeGroup || isPostingOneOnOne || isRedirectingRef.current) return;
-    setIsPostingOneOnOne(true);
-    setError(null);
-    try {
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-      const { error } = await supabase
-        .from('quick_connect_requests')
-        .insert({
-          user_id: user.id,
-          status: 'available',
-          expires_at: expiresAt,
-        });
-      if (error) throw error;
-      setActiveOneOnOne({
-        id: Date.now().toString(),
+  const postOneOnOneWithContext = async (context: string) => {
+  if (!user || activeOneOnOne || activeGroup || isPostingOneOnOne || isRedirectingRef.current) return;
+  setIsPostingOneOnOne(true);
+  setError(null);
+
+  try {
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('quick_connect_requests')
+      .insert({
         user_id: user.id,
         status: 'available',
-        created_at: new Date().toISOString(),
         expires_at: expiresAt,
-        user: { id: user.id, full_name: user.full_name, avatar_url: user.avatar_url },
-      });
-    } catch (err) {
-      console.error('Failed to post 1:1 request:', err);
-      setError('Failed to create one-on-one request.');
-    } finally {
-      setIsPostingOneOnOne(false);
+        context: context.trim() || null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // ✅ Create targeted notifications for other users
+    const { error: notifyError } = await supabase.rpc('create_targeted_notifications', {
+      req_type: 'one_on_one',
+      req_id: data.id,
+    });
+
+    if (notifyError) {
+      console.warn('Non-critical: failed to create notifications:', notifyError.message);
+      // Still proceed — request was created
     }
-  };
+
+    setActiveOneOnOne({
+      ...data,
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        avatar_url: user.avatar_url,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to post 1:1 request:', err);
+    setError('Failed to create one-on-one request.');
+  } finally {
+    setIsPostingOneOnOne(false);
+  }
+};
+
+  const postGroupWithContext = async (context: string) => {
+  if (!user || activeOneOnOne || activeGroup || isPostingGroup || isRedirectingRef.current) return;
+  setIsPostingGroup(true);
+  setError(null);
+
+  try {
+    const roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    const { error: insertErr } = await supabase
+      .from('quick_group_requests')
+      .insert({
+        user_id: user.id,
+        status: 'available',
+        expires_at: expiresAt,
+        room_id: roomId,
+        context: context.trim() || null,
+      });
+
+    if (insertErr) throw insertErr;
+
+    const { error: participantErr } = await supabase
+      .from('room_participants')
+      .insert({
+        room_id: roomId,
+        user_id: user.id,
+        role: 'host',
+      });
+
+    if (participantErr) throw participantErr;
+
+    // ✅ Create targeted notifications for other users
+    // First, get the request ID (since we didn't select it above)
+    const { data: reqData, error: fetchErr } = await supabase
+      .from('quick_group_requests')
+      .select('id')
+      .eq('room_id', roomId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!fetchErr && reqData?.id) {
+      const { error: notifyError } = await supabase.rpc('create_targeted_notifications', {
+        req_type: 'group',
+        req_id: reqData.id,
+      });
+
+      if (notifyError) {
+        console.warn('Non-critical: failed to create group notifications:', notifyError.message);
+      }
+    }
+
+    isRedirectingRef.current = true;
+    router.push(`/room/${roomId}`);
+  } catch (err) {
+    console.error('Failed to post group request:', err);
+    setError('Failed to create group call request.');
+  } finally {
+    setIsPostingGroup(false);
+  }
+};
 
   const cancelOneOnOne = async () => {
-    if (!activeOneOnOne || isRedirectingRef.current) return;
-    try {
-      const { error, data } = await supabase
-        .from('quick_connect_requests')
-        .update({ status: 'completed' })
-        .eq('id', activeOneOnOne.id)
-        .eq('status', 'available')
-        .select();
-      if (error) throw error;
-      if (!data || data.length === 0) {
-        setActiveOneOnOne(null);
-        setError('One-on-one request was already accepted or expired.');
-        return;
-      }
-      setActiveOneOnOne(null);
-    } catch (err) {
-      console.error('Failed to cancel 1:1:', err);
-      setError('Failed to cancel one-on-one request.');
+  if (!activeOneOnOne || isRedirectingRef.current) return;
+  setActiveOneOnOne(null); // optimistic
+
+  try {
+    const { error } = await supabase
+      .from('quick_connect_requests')
+      .update({ status: 'completed' })
+      .eq('id', activeOneOnOne.id)
+      .eq('status', 'available');
+
+    // ✅ Delete associated notifications
+    if (!error) {
+      await supabase
+        .from('notifications')
+        .delete()
+        .eq('source_id', activeOneOnOne.id)
+        .eq('type', 'one_on_one_request');
     }
-  };
+  } catch (err) {
+    console.error('Cancel 1:1 error:', err);
+  }
+};
 
-  // === GROUP LOGIC ===
-  const postGroup = async () => {
-    if (!user || activeOneOnOne || activeGroup || isPostingGroup || isRedirectingRef.current) return;
-    setIsPostingGroup(true);
-    setError(null);
-    try {
-      const roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-      // Insert group request WITH room_id
-      const { error: insertErr } = await supabase
-        .from('quick_group_requests')
-        .insert({
-          user_id: user.id,
-          status: 'available',
-          expires_at: expiresAt,
-          room_id: roomId,
-        });
-
-      if (insertErr) throw insertErr;
-
-      // Add host to room_participants
-      const { error: participantErr } = await supabase
-        .from('room_participants')
-        .insert({
-          room_id: roomId,
-          user_id: user.id,
-          role: 'host',
-        });
-
-      if (participantErr) throw participantErr;
-
-      // ✅ REDIRECT HOST IMMEDIATELY — like one-on-one
-      isRedirectingRef.current = true;
-      router.push(`/room/${roomId}`);
-    } catch (err) {
-      console.error('Failed to post group request:', err);
-      setError('Failed to create group call request.');
-    } finally {
-      setIsPostingGroup(false);
-    }
-  };
 
   const cancelGroup = async () => {
-    if (!activeGroup || isRedirectingRef.current) return;
-    try {
-      const { error, data } = await supabase
-        .from('quick_group_requests')
-        .update({ status: 'completed' })
-        .eq('id', activeGroup.id)
-        .eq('status', 'available')
-        .select();
-      if (error) throw error;
-      if (!data || data.length === 0) {
-        setActiveGroup(null);
-        setError('Group request was already accepted or expired.');
-        return;
-      }
-      setActiveGroup(null);
-    } catch (err) {
-      console.error('Failed to cancel group:', err);
-      setError('Failed to cancel group request.');
+  if (!activeGroup || isRedirectingRef.current) return;
+
+  try {
+    const { data, error } = await supabase
+      .from('quick_group_requests')
+      .update({ status: 'completed' })
+      .eq('id', activeGroup.id)
+      .eq('status', 'available')
+      .select();
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      // ✅ Delete notifications
+      await supabase
+        .from('notifications')
+        .delete()
+        .eq('source_id', activeGroup.id)
+        .eq('type', 'group_request');
     }
-  };
+
+    setActiveGroup(null);
+  } catch (err) {
+    console.error('Cancel group error:', err);
+    setError('Failed to cancel group request.');
+  }
+};
 
   const acceptOneOnOne = async (requestId: string) => {
     if (!user || isRedirectingRef.current) return;
@@ -618,6 +694,7 @@ export default function ConnectPage() {
               Post a one-on-one or group request when you need to talk — or join someone else&#39;s.
             </p>
           </div>
+          
         </div>
 
         {/* One-on-One Request */}
@@ -685,18 +762,20 @@ export default function ConnectPage() {
             <p style={{ color: '#78716c', marginBottom: '1.5rem', maxWidth: '32rem', margin: '0 auto' }}>
               Post a request to connect with someone who&#39;s available to listen right now.
             </p>
-            <button
-              onClick={postOneOnOne}
-              disabled={isPostingOneOnOne || !!activeGroup || isRedirectingRef.current}
-              style={{
-                ...styles.button,
-                ...(isPostingOneOnOne || activeGroup || isRedirectingRef.current ? styles.disabledButton : {}),
-                margin: '0 auto',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-              }}
-            >
-              {isPostingOneOnOne ? 'Creating...' : <><Phone size={20} /> Post 1:1 Request</>}
-            </button>
+            <>
+              <button
+  onClick={() => setShowContextModal('one-on-one')}
+  disabled={isPostingOneOnOne || !!activeGroup || isRedirectingRef.current}
+  style={{
+    ...styles.button,
+    ...(isPostingOneOnOne || activeGroup || isRedirectingRef.current ? styles.disabledButton : {}),
+    margin: '0 auto',
+    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+  }}
+>
+  <Phone size={20} /> Post 1:1 Request
+</button>
+            </>
           </div>
         )}
 
@@ -766,18 +845,18 @@ export default function ConnectPage() {
               Invite others to join a supportive group conversation. Anyone can join while it&#39;s active.
             </p>
             <button
-              onClick={postGroup}
-              disabled={isPostingGroup || !!activeOneOnOne || isRedirectingRef.current}
-              style={{
-                ...styles.button,
-                ...styles.groupButton,
-                ...(isPostingGroup || activeOneOnOne || isRedirectingRef.current ? styles.disabledButton : {}),
-                margin: '0 auto',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-              }}
-            >
-              {isPostingGroup ? 'Creating...' : <><Users size={20} /> Request Group Call</>}
-            </button>
+  onClick={() => setShowContextModal('group')}
+  disabled={isPostingGroup || !!activeOneOnOne || isRedirectingRef.current}
+  style={{
+    ...styles.button,
+    ...styles.groupButton,
+    ...(isPostingGroup || activeOneOnOne || isRedirectingRef.current ? styles.disabledButton : {}),
+    margin: '0 auto',
+    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+  }}
+>
+  <Users size={20} /> Request Group Call
+</button>
           </div>
         )}
 
@@ -794,73 +873,133 @@ export default function ConnectPage() {
           {allRequests.length > 0 ? (
             <div>
               {allRequests.map((request) => (
-                <div
-                  key={request.id}
-                  onClick={() => !isRedirectingRef.current && (request.type === 'group' ? acceptGroup(request.id) : acceptOneOnOne(request.id))}
-                  style={{ padding: '1.25rem', cursor: 'pointer', transition: 'background 0.2s' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = request.type === 'group' ? '#dbeafe' : '#fffbeb')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = '')}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                      <div style={styles.avatarPlaceholder}>
-                        {request.user?.avatar_url ? (
-                          <Image src={request.user.avatar_url} alt={request.user.full_name} width={40} height={40} className="rounded-full" />
-                        ) : (
-                          <span style={{ color: request.type === 'group' ? '#2563eb' : '#92400e', fontWeight: '600' }}>
-                            {request.user?.full_name?.charAt(0) || (request.type === 'group' ? '👥' : '👤')}
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <h3 style={{ fontWeight: '600', color: '#1c1917' }}>
-                          {request.user?.full_name} {request.type === 'group' ? ' (Group)' : ''}
-                        </h3>
-                        <p style={{ color: '#78716c', fontSize: '0.875rem', marginTop: '0.125rem' }}>
-                          {request.type === 'group' ? 'Group call open' : 'Needs to talk'} • {timeAgo(request.created_at)}
-                        </p>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', marginLeft: '1rem' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!isRedirectingRef.current) {
-                            if (request.type === 'group') {
-                              acceptGroup(request.id);
-                            } else {
-                              acceptOneOnOne(request.id);
-                            }
-                          }
-                        }}
-                        style={{
-                          background: request.type === 'group' ? '#3b82f6' : '#10b981',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '9999px',
-                          padding: '0.375rem 1rem',
-                          fontWeight: '600',
-                          fontSize: '0.875rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.375rem',
-                          transition: 'background 0.2s',
-                        }}
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.background = request.type === 'group' ? '#2563eb' : '#059669')
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.background = request.type === 'group' ? '#3b82f6' : '#10b981')
-                        }
-                      >
-                        <Phone size={16} />
-                        Join
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+  <div
+  key={request.id}
+  onClick={() => !isRedirectingRef.current && (request.type === 'group' ? acceptGroup(request.id) : acceptOneOnOne(request.id))}
+  style={{
+    padding: '1.5rem',
+    cursor: 'pointer',
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+    borderRadius: '1rem',
+    background: '#fff',
+    border: '1px solid #f4f4f5',
+    marginBottom: '0.75rem',
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.transform = 'scale(1.01)';
+    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.transform = 'scale(1)';
+    e.currentTarget.style.boxShadow = 'none';
+  }}
+>
+  <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+    {/* Avatar */}
+    <div style={{
+      width: '3rem',
+      height: '3rem',
+      borderRadius: '9999px',
+      background: '#fef3c7',
+      border: '2px solid #fcd34d',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    }}>
+      {request.user?.avatar_url ? (
+        <Image src={request.user.avatar_url} alt={request.user.full_name} width={48} height={48} className="rounded-full" />
+      ) : (
+        <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
+          {request.user?.full_name?.charAt(0) || '👤'}
+        </span>
+      )}
+    </div>
+
+    {/* Content */}
+    <div style={{ flex: 1 }}>
+      <h3 style={{
+        fontWeight: '700',
+        color: '#1c1917',
+        fontSize: '1.125rem',
+        marginBottom: '0.25rem',
+      }}>
+        {request.user?.full_name} {request.type === 'group' ? ' (Group)' : ''}
+      </h3>
+
+      <p style={{
+        color: '#78716c',
+        fontSize: '0.875rem',
+        marginBottom: '0.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+      }}>
+        <span>{request.type === 'group' ? 'Group call open' : 'Looking to talk now'}</span>
+        <span>•</span>
+        <span>{timeAgo(request.created_at)}</span>
+      </p>
+
+      {/* Context */}
+      {request.context && (
+        <div style={{
+          background: '#f9fafb',
+          border: '1px solid #e5e5e5',
+          borderRadius: '0.5rem',
+          padding: '0.75rem 1rem',
+          fontSize: '0.875rem',
+          color: '#57534e',
+          fontStyle: 'italic',
+          lineHeight: 1.5,
+          marginBottom: '0.75rem',
+          maxWidth: '100%',
+          wordBreak: 'break-word',
+        }}>
+          “{request.context}”
+        </div>
+      )}
+
+      {/* Join Button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!isRedirectingRef.current) {
+            if (request.type === 'group') {
+              acceptGroup(request.id);
+            } else {
+              acceptOneOnOne(request.id);
+            }
+          }
+        }}
+        style={{
+          background: request.type === 'group' ? '#3b82f6' : '#10b981',
+          color: 'white',
+          border: 'none',
+          borderRadius: '9999px',
+          padding: '0.5rem 1rem',
+          fontWeight: '600',
+          fontSize: '0.875rem',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          transition: 'background 0.2s',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+        }}
+        onMouseEnter={(e) =>
+          (e.currentTarget.style.background = request.type === 'group' ? '#2563eb' : '#059669')
+        }
+        onMouseLeave={(e) =>
+          (e.currentTarget.style.background = request.type === 'group' ? '#3b82f6' : '#10b981')
+        }
+      >
+        <Phone size={16} />
+        Connect
+      </button>
+    </div>
+  </div>
+</div>
+))}
             </div>
           ) : (
             <div style={{ padding: '3rem', textAlign: 'center', color: '#a8a29e' }}>
@@ -871,6 +1010,7 @@ export default function ConnectPage() {
             </div>
           )}
         </div>
+
 
         {/* How It Works */}
         <div style={{ ...styles.card, ...styles.sectionGap }}>
@@ -900,12 +1040,107 @@ export default function ConnectPage() {
               </div>
               <h3 style={{ fontWeight: '600', color: '#1c1917' }}>10-Min Window</h3>
               <p style={{ color: '#78716c', fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                Requests auto-expire after 10 minutes to keep the space fresh and responsive.
+                Requests auto-expire after 10 minutes.
               </p>
             </div>
           </div>
         </div>
+
+        {/* Context Modal */}
+          {showContextModal && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100vw',
+                height: '100vh',
+                background: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                zIndex: 100,
+              }}
+              onClick={() => setShowContextModal(null)}
+            >
+              <div
+                style={{
+                  background: '#fff',
+                  borderRadius: '1rem',
+                  padding: '1.5rem',
+                  width: '90%',
+                  maxWidth: '28rem',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                  position: 'relative',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 style={{ fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
+                  Why are you reaching out?
+                </h3>
+                <p style={{ color: '#78716c', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                  This helps others understand what to expect. (Optional, max 280 chars)
+                </p>
+                <textarea
+                  autoFocus
+                  value={tempContext}
+                  onChange={(e) => setTempContext(e.target.value.slice(0, 280))}
+                  placeholder="e.g., I lost my dog yesterday and feel overwhelmed..."
+                  maxLength={280}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem',
+                    borderRadius: '0.5rem',
+                    border: '1px solid #e5e5e5',
+                    fontSize: '0.875rem',
+                    resize: 'none',
+                    marginBottom: '0.75rem',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setShowContextModal(null)}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      background: '#f4f4f5',
+                      color: '#1c1917',
+                      border: 'none',
+                      borderRadius: '9999px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+  onClick={() => {
+    if (showContextModal === 'one-on-one') {
+      postOneOnOneWithContext(tempContext);
+    } else if (showContextModal === 'group') {
+      postGroupWithContext(tempContext);
+    }
+    setTempContext('');
+    setShowContextModal(null);
+  }}
+  style={{
+    padding: '0.5rem 1rem',
+    background: showContextModal === 'group' ? '#3b82f6' : '#d97706',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '9999px',
+    cursor: 'pointer',
+    fontWeight: '600',
+  }}
+>
+  Continue
+</button>
+                </div>
+              </div>
+            </div>
+          )}
       </div>
+
     </div>
+
   );
 }
