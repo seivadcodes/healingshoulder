@@ -1,72 +1,138 @@
+// app/report/page.tsx
 'use client';
 
-import CommentsSection from '@/components/CommentsSection';
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase';
+import { CommentsSection } from '@/components/CommentsSection';
+import { Heart } from 'lucide-react';
 
-export default function CommentsSectionTestPage() {
-  const mockPostId = 'post_12345';
+const TEST_POST_ID = 'test-post-123'; // Replace with real UUID in production
+
+export default function TestCommentsPage() {
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    fullName: string;
+    avatarUrl?: string;
+    isAnonymous: boolean;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const supabase = createClient();
+    const fetchUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        // Fallback for testing without auth
+        setCurrentUser({
+          id: 'test-user-id',
+          fullName: 'Test User',
+      
+          isAnonymous: false,
+        });
+        setLoading(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, is_anonymous')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profile) {
+        setCurrentUser({
+          id: profile.id,
+          fullName: profile.full_name || 'Friend',
+          avatarUrl: profile.avatar_url || undefined,
+          isAnonymous: profile.is_anonymous || false,
+        });
+      }
+      setLoading(false);
+    };
+
+    fetchUser();
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center' }}>
+        Loading user...
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', color: '#1e293b' }}>
-        💬 Inline Comments Section Test
-      </h1>
-
-      {/* Simulated Post */}
-      <div
-        style={{
-          border: '1px solid #e2e8f0',
-          borderRadius: '12px',
-          padding: '1.25rem',
-          background: '#fff',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-          <div
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              background: '#cbd5e1',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              color: '#64748b',
-              fontWeight: 'bold',
-            }}
-          >
-            AR
+    <div style={{ maxWidth: '600px', margin: '2rem auto', padding: '0 1rem' }}>
+      {/* Placeholder Post */}
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '1rem',
+        border: '1px solid #e7e5e4',
+        padding: '1.5rem',
+        marginBottom: '2rem',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      }}>
+        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div style={{
+            width: '2.5rem',
+            height: '2.5rem',
+            borderRadius: '9999px',
+            backgroundColor: '#fef3c7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <span style={{ color: '#92400e', fontWeight: 500 }}>T</span>
           </div>
           <div>
-            <div style={{ fontWeight: '600', color: '#1e293b' }}>Alex Rivera</div>
-            <div style={{ fontSize: '0.875rem', color: '#94a3b8' }}>2 hours ago</div>
+            <h3 style={{ fontWeight: 500, color: '#1c1917' }}>Test User</h3>
+            <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.25rem' }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                backgroundColor: '#fffbeb',
+                color: '#92400e',
+                fontSize: '0.75rem',
+                padding: '0.125rem 0.5rem',
+                borderRadius: '9999px',
+              }}>
+                <Heart size={10} style={{ color: '#d97706' }} />
+                Loss of a Parent
+              </span>
+            </div>
           </div>
         </div>
 
-        <div
-          style={{
-            width: '100%',
-            height: '200px',
-            background: '#f8fafc',
-            border: '1px dashed #cbd5e1',
-            borderRadius: '8px',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            color: '#94a3b8',
-            marginBottom: '1rem',
-          }}
-        >
-          🖼️ Memory Photo
-        </div>
-
-        <p style={{ color: '#1e293b', lineHeight: 1.6 }}>
-          Today I remembered how my dog used to wait by the door every time I came home. Those little moments stay with you forever.
+        <p style={{ color: '#1c1917', lineHeight: 1.6, marginBottom: '1rem' }}>
+          This is a test post to demonstrate the comments section. You can reply below!
         </p>
 
-        {/* 👇 INLINE COMMENTS — no modal! */}
-        <CommentsSection targetId={mockPostId} targetType="post" />
+        {/* Placeholder Image */}
+        <div style={{
+          width: '100%',
+          height: '200px',
+          backgroundColor: '#f5f5f4',
+          borderRadius: '0.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#78716c',
+          border: '1px dashed #d6d3d1',
+        }}>
+          🖼️ Placeholder Image
+        </div>
       </div>
+
+      {/* Comments Section */}
+      {currentUser && (
+        <CommentsSection
+          parentId={TEST_POST_ID}
+          parentType="post"
+          currentUser={currentUser}
+        />
+      )}
     </div>
   );
 }
