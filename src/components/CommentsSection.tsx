@@ -3,9 +3,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
-import { Heart, Send, MessageCircle, X, ChevronDown, ChevronUp, ArrowUpDown } from 'lucide-react';
+import { 
+  Heart, 
+  Send, 
+  MessageCircle, 
+  X, 
+  ChevronDown, 
+  ChevronUp, 
+  ArrowUpDown,
+  Edit,
+  Flag,
+  Loader2,
+  Trash2,
+} from 'lucide-react';
 import Image from 'next/image';
 import { formatDistanceToNow } from 'date-fns';
+import ReportModal from '@/components/modals/ReportModal'; // ✅ Import report modal
 
 interface Comment {
   id: string;
@@ -14,13 +27,14 @@ interface Comment {
   created_at: string;
   likes_count: number;
   is_anonymous: boolean;
-  author_name: string;              
-  author_avatar_url: string | null; 
+  author_name: string;
+  author_avatar_url: string | null;
   is_deleted: boolean;
   parent_comment_id: string | null;
   replies_count: number;
   is_liked: boolean;
 }
+
 interface CommentsSectionProps {
   parentId: string;
   parentType: 'post' | 'story' | 'memory';
@@ -58,12 +72,25 @@ export function CommentsSection({
   const [windowWidth, setWindowWidth] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
+  
+  // ✅ NEW: Editing state
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editedContent, setEditedContent] = useState<string>('');
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  // ✅ NEW: Reporting state
+  const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
+  const [openCommentMenu, setOpenCommentMenu] = useState<string | null>(null);
+  const commentMenuRef = useRef<HTMLDivElement>(null);
 
+  // ✅ NEW: Always fetch current avatar from DB
+  const [currentAvatar, setCurrentAvatar] = useState<string | null>(null);
+  
   // Post like state
   const [postLikesCount, setPostLikesCount] = useState(0);
   const [postIsLiked, setPostIsLiked] = useState(false);
   const [isPostLikeLoading, setIsPostLikeLoading] = useState(false);
-
+  
   // Sort control
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
@@ -74,44 +101,90 @@ export function CommentsSection({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Fetch initial post like state
-  const loadPostLikeState = useCallback(async () => {
-    if (!currentUser.id) {
-      setPostLikesCount(0);
-      setPostIsLiked(false);
-      return;
-    }
-    try {
-      const { count, error: countError } = await supabase
-        .from('post_likes')
-        .select('*', { count: 'exact', head: true })
-        .eq('post_id', parentId);
-      if (!countError && count !== null) {
-        setPostLikesCount(count);
+  // Close comment menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (commentMenuRef.current && !commentMenuRef.current.contains(event.target as Node)) {
+        setOpenCommentMenu(null);
       }
-
-      const { data, error: likeError } = await supabase
-        .from('post_likes')
-        .select('*')
-        .eq('post_id', parentId)
-        .eq('user_id', currentUser.id)
-        .single();
-      setPostIsLiked(!!data && !likeError);
-    } catch (err) {
-      console.error('Failed to load post like state:', err);
+    };
+    if (openCommentMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
     }
-  }, [parentId, currentUser.id, supabase]);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [openCommentMenu]);
 
-  const checkIfUserLiked = async (commentId: string): Promise<boolean> => {
-    if (!currentUser.id) return false;
-    const { data, error } = await supabase
-      .from('comment_likes')
+  // Fetch current user avatar on mount and keep it fresh
+  useEffect(() => {
+    const fetchCurrentAvatar = async () => {
+      if (!currentUser.id) return;
+      try {
+        const { data: profileData, error } = await supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('id', currentUser.id)
+          .single();
+        if (error) {
+          console.warn('Failed to fetch avatar:', error);
+          setCurrentAvatar(null);
+        } else {
+          setCurrentAvatar(profileData?.avatar_url || null);
+        }
+      } catch (err) {
+        console.error('Unexpected error fetching avatar:', err);
+        setCurrentAvatar(null);
+      }
+    };
+    fetchCurrentAvatar();
+  }, [currentUser.id, supabase]);
+
+  const loadPostLikeState = useCallback(async () => {
+  if (!currentUser.id) {
+    setPostLikesCount(0);
+    setPostIsLiked(false);
+    return;
+  }
+
+  try {
+    // Count total likes for this post
+    const { count, error: countError } = await supabase
+      .from('likes')
+      .select('*', { count: 'exact', head: true })
+      .eq('target_type', parentType)
+      .eq('target_id', parentId);
+
+    if (!countError && count !== null) {
+      setPostLikesCount(count);
+    }
+
+    // Check if current user liked it
+    const { data, error: likeError } = await supabase
+      .from('likes')
       .select('id')
-      .eq('comment_id', commentId)
+      .eq('target_type', parentType)
+      .eq('target_id', parentId)
       .eq('user_id', currentUser.id)
       .single();
-    return !error && !!data;
-  };
+
+    setPostIsLiked(!!data && !likeError);
+  } catch (err) {
+    console.error('Failed to load post like state:', err);
+  }
+}, [parentId, parentType, currentUser.id, supabase]);
+
+  const checkIfUserLiked = async (commentId: string): Promise<boolean> => {
+  if (!currentUser.id) return false;
+  const { data, error } = await supabase
+    .from('comment_likes')
+    .select('id')
+    .eq('comment_id', commentId)
+    .eq('user_id', currentUser.id)
+    .maybeSingle(); // ← This returns null instead of throwing on 0 rows
+
+  return !error && !!data;
+};
 
   const toggleCommentLike = async (commentId: string, currentlyLiked: boolean) => {
     if (!currentUser.id) return;
@@ -131,35 +204,138 @@ export function CommentsSection({
   };
 
   const togglePostLike = async () => {
-    if (!currentUser.id) return;
-    setIsPostLikeLoading(true);
-    const previousIsLiked = postIsLiked;
-    const previousLikesCount = postLikesCount;
+  if (!currentUser.id) return;
 
-    setPostIsLiked(!previousIsLiked);
-    setPostLikesCount(previousIsLiked ? Math.max(0, previousLikesCount - 1) : previousLikesCount + 1);
+  setIsPostLikeLoading(true);
+  const previousIsLiked = postIsLiked;
+  const previousLikesCount = postLikesCount;
 
-    try {
-      if (previousIsLiked) {
-        const { error } = await supabase
-          .from('post_likes')
-          .delete()
-          .eq('post_id', parentId)
-          .eq('user_id', currentUser.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('post_likes')
-          .insert({ post_id: parentId, user_id: currentUser.id });
-        if (error) throw error;
-      }
-    } catch (err) {
-      console.error('Post like toggle failed:', err);
-      setPostIsLiked(previousIsLiked);
-      setPostLikesCount(previousLikesCount);
-    } finally {
-      setIsPostLikeLoading(false);
+  // Optimistic UI update
+  setPostIsLiked(!previousIsLiked);
+  setPostLikesCount(previousIsLiked ? Math.max(0, previousLikesCount - 1) : previousLikesCount + 1);
+
+  try {
+    if (previousIsLiked) {
+      // Unlike: delete from `likes`
+      const { error } = await supabase
+        .from('likes')
+        .delete()
+        .eq('target_type', parentType)
+        .eq('target_id', parentId)
+        .eq('user_id', currentUser.id);
+
+      if (error) throw error;
+    } else {
+      // Like: insert into `likes`
+      const { error } = await supabase
+        .from('likes')
+        .insert({
+          target_type: parentType,
+          target_id: parentId,
+          user_id: currentUser.id,
+        });
+
+      if (error) throw error;
     }
+  } catch (err) {
+    console.error('Post like toggle failed:', err);
+    // Revert optimistic update
+    setPostIsLiked(previousIsLiked);
+    setPostLikesCount(previousLikesCount);
+  } finally {
+    setIsPostLikeLoading(false);
+  }
+};
+
+  // ✅ NEW: Edit comment function
+  const editComment = async (commentId: string, newContent: string) => {
+    if (!currentUser.id || !newContent.trim()) return;
+    
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('comments')
+        .update({ content: newContent.trim() })
+        .eq('id', commentId)
+        .eq('user_id', currentUser.id);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setComments(prev => updateCommentInTree(prev, {
+        ...findCommentInTree(prev, commentId)!,
+        content: newContent.trim()
+      }));
+      
+      setEditingCommentId(null);
+      setEditedContent('');
+    } catch (err) {
+      console.error('Error updating comment:', err);
+      setError('Failed to update comment');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // ✅ NEW: Delete comment function (with confirmation)
+  const deleteComment = async (commentId: string) => {
+    if (!confirm('Are you sure you want to delete this comment?')) return;
+    
+    try {
+      // Get all descendant IDs for deletion
+      const { data: allComments, error: fetchError } = await supabase
+        .from('comments')
+        .select('id, parent_comment_id')
+        .eq('parent_id', parentId)
+        .eq('parent_type', parentType);
+      
+      if (fetchError) throw fetchError;
+      
+      const getDescendantIds = (parentId: string): string[] => {
+        const directChildren = allComments.filter(c => c.parent_comment_id === parentId);
+        return [
+          ...directChildren.map(c => c.id),
+          ...directChildren.flatMap(c => getDescendantIds(c.id))
+        ];
+      };
+      
+      const descendantIds = getDescendantIds(commentId);
+      const idsToDelete = [commentId, ...descendantIds];
+      
+      // Delete from DB
+      const { error: deleteError } = await supabase
+        .from('comments')
+        .delete()
+        .in('id', idsToDelete);
+      
+      if (deleteError) throw deleteError;
+      
+      // Update local state
+      setComments(prev => removeCommentFromTree(prev, commentId));
+    } catch (err) {
+      console.error('Error deleting comment:', err);
+      setError('Failed to delete comment');
+    }
+  };
+
+  // Helper to find a comment in the tree
+  const findCommentInTree = (threads: CommentThread[], id: string): Comment | null => {
+    for (const thread of threads) {
+      if (thread.comment.id === id) return thread.comment;
+      const found = findCommentInTree(thread.replies, id);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  // Helper to remove comment and descendants
+  const removeCommentFromTree = (threads: CommentThread[], id: string): CommentThread[] => {
+    return threads
+      .filter(thread => thread.comment.id !== id)
+      .map(thread => ({
+        ...thread,
+        replies: removeCommentFromTree(thread.replies, id)
+      }));
   };
 
   const sortThreads = (threads: CommentThread[]): CommentThread[] => {
@@ -189,35 +365,32 @@ export function CommentsSection({
   const loadComments = useCallback(async () => {
     setIsLoading(true);
     try {
-   const { data, error } = await supabase
-  .from('comments')
-  .select(`
-    id,
-    user_id,
-    content,
-    created_at,
-    likes_count,
-    is_anonymous,
-    author_name,
-    author_avatar_url,
-    is_deleted,
-    parent_comment_id,
-    replies_count
-  `)
-  .eq('parent_id', parentId)
-  .eq('parent_type', parentType)
-  .eq('is_deleted', false)
-  .order('created_at', { ascending: sortOrder === 'oldest' });
-
+      const { data, error } = await supabase
+        .from('comments')
+        .select(`
+          id,
+          user_id,
+          content,
+          created_at,
+          likes_count,
+          is_anonymous,
+          author_name,
+          author_avatar_url,
+          is_deleted,
+          parent_comment_id,
+          replies_count
+        `)
+        .eq('parent_id', parentId)
+        .eq('parent_type', parentType)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: sortOrder === 'oldest' });
       if (error) throw error;
-
       const commentsWithLikes = await Promise.all(
         data.map(async (comment) => ({
           ...comment,
           is_liked: await checkIfUserLiked(comment.id)
         }))
       );
-
       const commentMap = new Map<string, CommentThread>();
       commentsWithLikes.forEach(comment => {
         commentMap.set(comment.id, {
@@ -225,7 +398,6 @@ export function CommentsSection({
           replies: []
         });
       });
-
       const topLevelComments: CommentThread[] = [];
       commentsWithLikes.forEach(comment => {
         if (!comment.parent_comment_id) {
@@ -235,8 +407,6 @@ export function CommentsSection({
           parent.replies.push(commentMap.get(comment.id)!);
         }
       });
-
-      // Apply sort AFTER building tree
       const sortedComments = sortThreads(topLevelComments);
       setComments(sortedComments);
     } catch (err) {
@@ -247,68 +417,71 @@ export function CommentsSection({
     }
   }, [parentId, parentType, currentUser.id, sortOrder]);
 
-  useEffect(() => {
-    loadPostLikeState();
-    loadComments();
+ useEffect(() => {
+  loadPostLikeState();
+  loadComments();
 
-    const postLikeChannel = supabase
-      .channel(`post-likes-${parentId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'post_likes',
-          filter: `post_id=eq.${parentId}`
-        },
-        () => {
-          loadPostLikeState();
+  // ✅ Realtime channel for likes on the parent (post, community_post, etc.)
+  const likeChannel = supabase
+    .channel(`likes-${parentType}-${parentId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'likes',
+        filter: `target_type=eq.${parentType},target_id=eq.${parentId}`
+      },
+      () => {
+        loadPostLikeState(); // Re-fetch like count & user like status
+      }
+    )
+    .subscribe();
+
+  // ✅ Realtime channel for comments under this parent
+  const commentChannel = supabase
+    .channel(`comments-${parentId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'comments',
+        filter: `parent_id=eq.${parentId},is_deleted=is.false`
+      },
+      async (payload) => {
+        const newComment = payload.new as Comment;
+        if (newComment.user_id !== currentUser.id) {
+          handleNewComment({ ...newComment, is_liked: false });
         }
-      )
-      .subscribe();
-
-    const commentChannel = supabase
-      .channel(`comments-${parentId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'comments',
-          filter: `parent_id=eq.${parentId},is_deleted=is.false`
-        },
-        async (payload) => {
-          const newComment = payload.new as Comment;
-          if (newComment.user_id !== currentUser.id) {
-            handleNewComment({ ...newComment, is_liked: false });
-          }
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'comments',
+        filter: `parent_id=eq.${parentId}`
+      },
+      (payload) => {
+        const updatedComment = payload.new as Comment;
+        if (updatedComment.is_deleted) {
+          setComments(prev => removeCommentFromTree(prev, updatedComment.id));
+        } else {
+          // Note: we don't refetch like state here — likes are handled via separate channel
+          setComments(prev => updateCommentInTree(prev, { ...updatedComment, is_liked: false }));
         }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'comments',
-          filter: `parent_id=eq.${parentId}`
-        },
-        (payload) => {
-          const updatedComment = payload.new as Comment;
-          if (updatedComment.is_deleted) {
-            setComments(prev => removeComment(prev, updatedComment.id));
-          } else {
-            setComments(prev => updateCommentInTree(prev, { ...updatedComment, is_liked: false }));
-          }
-        }
-      )
-      .subscribe();
+      }
+    )
+    .subscribe();
 
-    return () => {
-      supabase.removeChannel(postLikeChannel);
-      supabase.removeChannel(commentChannel);
-    };
-  }, [parentId, parentType, loadComments, loadPostLikeState, currentUser.id]);
-
+  // ✅ Cleanup: unsubscribe from the channels you actually created
+  return () => {
+    supabase.removeChannel(likeChannel);
+    supabase.removeChannel(commentChannel);
+  };
+}, [parentId, parentType, loadComments, loadPostLikeState, currentUser.id, supabase]);
   // --- Helper functions ---
   const updateCommentInTree = (
     threads: CommentThread[],
@@ -339,7 +512,6 @@ export function CommentsSection({
     if (parentId) {
       setComments(prev => updateReplies(prev, parentId, comment));
     } else {
-      // Insert at correct position based on sort order
       setComments(prev => {
         const newThread = { comment, replies: [] };
         const updated = [...prev, newThread];
@@ -558,43 +730,50 @@ export function CommentsSection({
       ? (replyTexts[replyToCommentId] || '').trim()
       : newTopLevelComment.trim();
     if (!content || isSubmitting) return;
-    setIsSubmitting(true);
-    setError(null);
     const commentId = uuidv4();
     const now = new Date().toISOString();
-    const authorName = currentUser.isAnonymous ? 'Anonymous' : currentUser.fullName;
-    const authorAvatar = currentUser.isAnonymous
-      ? null
-      : (currentUser.avatarUrl || null);
-    const newCommentObj: Comment = {
-      id: commentId,
-      user_id: currentUser.id,
-      is_anonymous: currentUser.isAnonymous,
-      author_name: authorName,
-      author_avatar_url: authorAvatar,
-      content,
-      created_at: now,
-      likes_count: 0,
-      is_deleted: false,
-      parent_comment_id: replyToCommentId || null,
-      replies_count: 0,
-      is_liked: false
-    };
-
-    if (replyToCommentId) {
-      addReplyOptimistically(replyToCommentId, newCommentObj);
-      setReplyTexts(prev => ({ ...prev, [replyToCommentId]: '' }));
-      setActiveReplyId(null);
-    } else {
-      addTopLevelCommentOptimistically(newCommentObj);
-      setNewTopLevelComment('');
-    }
-
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-
+    setIsSubmitting(true);
+    setError(null);
     try {
+      // 🔁 Fetch fresh profile (including avatar) at submit time too
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('full_name, avatar_url')
+        .eq('id', currentUser.id)
+        .single();
+      const authorName = currentUser.isAnonymous
+        ? 'Anonymous'
+        : (profileData?.full_name || currentUser.fullName || 'Someone');
+      const authorAvatar = currentUser.isAnonymous
+        ? null
+        : (profileData?.avatar_url || null);
+      const newCommentObj: Comment = {
+        id: commentId,
+        user_id: currentUser.id,
+        is_anonymous: currentUser.isAnonymous,
+        author_name: authorName,
+        author_avatar_url: authorAvatar,
+        content,
+        created_at: now,
+        likes_count: 0,
+        is_deleted: false,
+        parent_comment_id: replyToCommentId || null,
+        replies_count: 0,
+        is_liked: false,
+      };
+      // Optimistic UI
+      if (replyToCommentId) {
+        addReplyOptimistically(replyToCommentId, newCommentObj);
+        setReplyTexts(prev => ({ ...prev, [replyToCommentId]: '' }));
+        setActiveReplyId(null);
+      } else {
+        addTopLevelCommentOptimistically(newCommentObj);
+        setNewTopLevelComment('');
+      }
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      // Save to DB
       const { error } = await supabase
         .from('comments')
         .insert({
@@ -607,7 +786,7 @@ export function CommentsSection({
           author_avatar_url: authorAvatar,
           content,
           created_at: now,
-          parent_comment_id: replyToCommentId || null
+          parent_comment_id: replyToCommentId || null,
         });
       if (error) throw error;
     } catch (err) {
@@ -631,13 +810,6 @@ export function CommentsSection({
   };
 
   const getAvatar = (comment: Comment) => {
-     console.log('Rendering avatar for comment:', {
-    id: comment.id,
-    author_name: comment.author_name,
-    author_avatar_url: comment.author_avatar_url,
-    is_anonymous: comment.is_anonymous,
-  });
-    
     if (comment.is_anonymous) {
       return (
         <div style={{
@@ -696,6 +868,9 @@ export function CommentsSection({
     const isMobile = windowWidth < MOBILE_BREAKPOINT;
     const isReplyOpen = activeReplyId === comment.id;
     const areRepliesExpanded = expandedReplies[comment.id];
+    const isAuthor = comment.user_id === currentUser.id;
+    const isMenuOpen = openCommentMenu === comment.id;
+
     return (
       <div key={comment.id} style={{
         marginLeft: depth > 0 ? '24px' : '0',
@@ -751,79 +926,251 @@ export function CommentsSection({
                     </span>
                   )}
                 </div>
-                <span style={{
-                  color: '#6B7280',
-                  fontSize: '0.75rem',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    color: '#6B7280',
+                    fontSize: '0.75rem',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })}
+                  </span>
+                  
+                  {/* ✅ Comment menu (edit/delete/report) */}
+                  {currentUser.id && (
+                    <div ref={commentMenuRef} style={{ position: 'relative' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenCommentMenu(isMenuOpen ? null : comment.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          borderRadius: '4px',
+                          color: '#6B7280'
+                        }}
+                        aria-label="Comment options"
+                      >
+                        <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>⋯</span>
+                      </button>
+                      
+                      {isMenuOpen && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '100%',
+                            right: 0,
+                            marginTop: '4px',
+                            backgroundColor: '#fff',
+                            border: '1px solid #E5E7EB',
+                            borderRadius: '8px',
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                            minWidth: '120px',
+                            zIndex: 10
+                          }}
+                        >
+                          {isAuthor && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCommentId(comment.id);
+                                setEditedContent(comment.content);
+                                setOpenCommentMenu(null);
+                              }}
+                              style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: '8px 12px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#3B82F6',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                              }}
+                            >
+                              <Edit size={14} />
+                              Edit
+                            </button>
+                          )}
+                          
+                          {(isAuthor || !isAuthor) && (
+                            <button
+ onClick={(e) => {
+  e.stopPropagation();
+  setReportingCommentId(comment.id);
+  // Defer closing the menu to next tick
+  setTimeout(() => setOpenCommentMenu(null), 0);
+}}
+  style={{
+    width: '100%',
+    textAlign: 'left',
+    padding: '8px 12px',
+    background: 'none',
+    border: 'none',
+    color: '#F59E0B',
+    cursor: 'pointer',
+    fontSize: '0.875rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  }}
+>
+  <Flag size={14} />
+  Report
+</button>
+                          )}
+                          
+                          {isAuthor && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await deleteComment(comment.id);
+                                setOpenCommentMenu(null);
+                              }}
+                              style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: '8px 12px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#EF4444',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                              }}
+                            >
+                              <Trash2 size={14} />
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              <p style={{
-                color: '#374151',
-                lineHeight: 1.5,
-                whiteSpace: 'pre-wrap',
-                fontSize: '0.875rem'
-              }}>
-                {comment.content}
-              </p>
+              
+              {/* ✅ Edit form */}
+              {editingCommentId === comment.id ? (
+                <div style={{ marginTop: '8px' }}>
+                  <textarea
+                    value={editedContent}
+                    onChange={(e) => setEditedContent(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: '1px solid #D1D5DB',
+                      borderRadius: '8px',
+                      minHeight: '60px',
+                      fontSize: '0.875rem',
+                      resize: 'vertical'
+                    }}
+                    maxLength={500}
+                  />
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'flex-end', 
+                    gap: '8px', 
+                    marginTop: '8px' 
+                  }}>
+                    <button
+                      onClick={() => {
+                        setEditingCommentId(null);
+                        setEditedContent('');
+                      }}
+                      style={{
+                        padding: '4px 8px',
+                        background: 'none',
+                        border: '1px solid #D1D5DB',
+                        borderRadius: '6px',
+                        color: '#6B7280',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => editComment(comment.id, editedContent)}
+                      disabled={isUpdating || !editedContent.trim()}
+                      style={{
+                        padding: '4px 8px',
+                        backgroundColor: isUpdating || !editedContent.trim() ? '#E5E7EB' : '#F59E0B',
+                        color: isUpdating || !editedContent.trim() ? '#9CA3AF' : '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontWeight: 500,
+                        fontSize: '0.875rem',
+                        cursor: isUpdating || !editedContent.trim() ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {isUpdating ? (
+                        <div style={{
+                          width: '16px',
+                          height: '16px',
+                          border: '2px solid rgba(255,255,255,0.5)',
+                          borderTopColor: 'white',
+                          borderRadius: '50%',
+                          animation: 'spin 0.8s linear infinite'
+                        }} />
+                      ) : 'Update'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p style={{
+                  color: '#374151',
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  fontSize: '0.875rem'
+                }}>
+                  {comment.content}
+                </p>
+              )}
             </div>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-              marginTop: '8px',
-              flexWrap: 'wrap'
-            }}>
-              <button
-                onClick={() => handleLike(comment.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  color: comment.is_liked ? '#EF4444' : '#6B7280',
-                  fontSize: '0.75rem',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  borderRadius: '6px',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-              >
-                <Heart
-                  size={14}
-                  fill={comment.is_liked ? 'currentColor' : 'none'}
-                  stroke="currentColor"
-                />
-                <span>{comment.likes_count || 0}</span>
-              </button>
-              <button
-                onClick={() => toggleReply(comment.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  color: '#6B7280',
-                  fontSize: '0.75rem',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  borderRadius: '6px',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-              >
-                <MessageCircle size={14} />
-                <span>Reply</span>
-              </button>
-              {replies.length > 0 && (
+            
+            {!editingCommentId && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '16px',
+                marginTop: '8px',
+                flexWrap: 'wrap'
+              }}>
                 <button
-                  onClick={() => toggleReplies(comment.id)}
+                  onClick={() => handleLike(comment.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: comment.is_liked ? '#EF4444' : '#6B7280',
+                    fontSize: '0.75rem',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <Heart
+                    size={14}
+                    fill={comment.is_liked ? 'currentColor' : 'none'}
+                    stroke="currentColor"
+                  />
+                  <span>{comment.likes_count || 0}</span>
+                </button>
+                <button
+                  onClick={() => toggleReply(comment.id)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -840,11 +1187,35 @@ export function CommentsSection({
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  {areRepliesExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  <span>{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
+                  <MessageCircle size={14} />
+                  <span>Reply</span>
                 </button>
-              )}
-            </div>
+                {replies.length > 0 && (
+                  <button
+                    onClick={() => toggleReplies(comment.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      color: '#6B7280',
+                      fontSize: '0.75rem',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    {areRepliesExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    <span>{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
+                  </button>
+                )}
+              </div>
+            )}
+            
             {isReplyOpen && (
               <div style={{ marginTop: '12px', paddingLeft: '8px' }}>
                 <ReplyForm
@@ -852,11 +1223,15 @@ export function CommentsSection({
                   onChange={(val) => setReplyTexts(prev => ({ ...prev, [comment.id]: val }))}
                   onSubmit={() => handleSubmit(comment.id)}
                   isSubmitting={isSubmitting}
-                  currentUser={currentUser}
+                  currentUser={{
+                    ...currentUser,
+                    avatarUrl: currentAvatar ?? undefined
+                  }}
                   isMobile={windowWidth < MOBILE_BREAKPOINT}
                 />
               </div>
             )}
+            
             {areRepliesExpanded && replies.length > 0 && (
               <div style={{ marginTop: '12px', borderLeft: '2px solid #E5E7EB', paddingLeft: '16px' }}>
                 {replies.map(childThread => renderComment(childThread, depth + 1))}
@@ -869,7 +1244,6 @@ export function CommentsSection({
   };
 
   const topLevelCommentCount = comments.length;
-
   if (isLoading) {
     return (
       <div style={{
@@ -973,7 +1347,6 @@ export function CommentsSection({
         </div>
         {comments.length > 0 && (
           <div style={{ marginBottom: '16px' }}>
-            {/* Show latest comment in preview */}
             {renderComment(comments[0], 0)}
           </div>
         )}
@@ -1046,7 +1419,6 @@ export function CommentsSection({
             <span>{topLevelCommentCount}</span>
           </button>
         </div>
-
         {/* Sort Toggle */}
         <button
           onClick={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
@@ -1070,7 +1442,7 @@ export function CommentsSection({
           <span>{sortOrder === 'newest' ? 'Newest' : 'Oldest'}</span>
         </button>
       </div>
-
+      
       {/* Main Comment Form */}
       <div style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -1090,7 +1462,7 @@ export function CommentsSection({
               >
                 <span style={{ color: '#92400E', fontWeight: 600, fontSize: '1rem' }}>A</span>
               </div>
-            ) : currentUser.avatarUrl ? (
+            ) : currentAvatar ? (
               <div
                 style={{
                   width: '40px',
@@ -1101,7 +1473,7 @@ export function CommentsSection({
                 }}
               >
                 <Image
-                  src={currentUser.avatarUrl}
+                  src={currentAvatar}
                   alt="Your avatar"
                   width={40}
                   height={40}
@@ -1215,7 +1587,7 @@ export function CommentsSection({
           </div>
         </div>
       </div>
-
+      
       {/* Full Comments List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {comments.map((thread) => renderComment(thread))}
@@ -1232,7 +1604,16 @@ export function CommentsSection({
           </div>
         )}
       </div>
-
+      
+      {/* ✅ Report Modal */}
+      <ReportModal
+        isOpen={!!reportingCommentId}
+        onClose={() => setReportingCommentId(null)}
+        targetId={reportingCommentId || ''}
+        targetType="comment"
+        currentUserId={currentUser.id}
+      />
+      
       <style jsx global>{`
         @keyframes spin {
           to {
@@ -1366,6 +1747,7 @@ function ReplyForm({
             <Send size={14} color={!value.trim() ? '#9CA3AF' : '#FFFFFF'} style={{ strokeWidth: 1.5 }} />
           )}
         </button>
+        
       </div>
     </form>
   );

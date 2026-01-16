@@ -21,6 +21,7 @@ interface ReportContext {
 }
 
 export default function ReportModal({
+  
   isOpen,
   onClose,
   targetId,
