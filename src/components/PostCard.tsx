@@ -1,12 +1,9 @@
-// src/components/PostCard.tsx
 'use client';
 
 import { useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  Heart,
-  MessageCircle,
   Trash2,
   Loader2,
 } from 'lucide-react';
@@ -40,13 +37,18 @@ export interface Post {
   text: string;
   mediaUrl?: string | null;
   mediaUrls?: string[];
-  griefTypes?: GriefType[];
+  griefTypes: GriefType[];
   createdAt: Date;
   likes: number;
-  isLiked?: boolean;
+  isLiked: boolean;
   commentsCount: number;
   isAnonymous: boolean;
-  user?: PostAuthor;
+  user?: {
+    id: string;
+    fullName: string | null;
+    avatarUrl: string | null;
+    isAnonymous: boolean;
+  };
 }
 
 // ─── HELPER: Time formatting ───────────────────────
@@ -70,7 +72,7 @@ function formatRecentActivity(date: Date | string): string {
   return years === 1 ? '1 year ago' : `${years} years ago`;
 }
 
-// ─── STYLES (INLINE ONLY, NO TAILWIND) ─────────────
+// ─── STYLES ────────────────────────────────────────
 const baseColors = {
   primary: '#f59e0b',
   secondary: '#1e293b',
@@ -127,10 +129,9 @@ export interface PostCardProps {
   isOwner?: boolean;
   canDelete?: boolean;
   readonly?: boolean;
-  onDelete?: () => void;
+  onPostDeleted?: () => void;
   showAuthor?: boolean;
   context?: 'profile' | 'community' | 'feed';
-  onPostDeleted?: () => void;
 }
 
 // ─── COMPONENT ────────────────────────────────────
@@ -139,28 +140,30 @@ export function PostCard({
   isOwner = false,
   canDelete = false,
   readonly = false,
+  onPostDeleted,
   showAuthor = true,
   context = 'feed',
-  onPostDeleted,
 }: PostCardProps) {
   const supabase = useMemo(() => createClient(), []);
   const { user: currentUser } = useAuth();
 
-  // Like state
-  const [likesCount, setLikesCount] = useState(post.likes);
-  const [isLiked, setIsLiked] = useState(post.isLiked || false);
-  const [likeLoading, setLikeLoading] = useState(false);
+  // Only keep delete loading state
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Media gallery
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
 
-  const allMediaUrls = useMemo(() => {
-    if (post.mediaUrls && post.mediaUrls.length > 0) {
-      return post.mediaUrls.filter(url => url);
+  const mediaUrls = useMemo(() => {
+    if (Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0) {
+      return post.mediaUrls.filter(Boolean);
     }
-    return post.mediaUrl ? [post.mediaUrl] : [];
+    if (post.mediaUrl) {
+      return [post.mediaUrl];
+    }
+    return [];
   }, [post.mediaUrl, post.mediaUrls]);
+
+  const hasMedia = mediaUrls.length > 0;
 
   const gradient = useMemo(() => {
     if (!post.griefTypes || post.griefTypes.length === 0) return defaultGradient;
@@ -180,92 +183,6 @@ export function PostCard({
     return { name: 'Someone', avatar: null };
   }, [post]);
 
-  // 🔁 Like sync
-  useMemo(() => {
-    if (!post.id) return;
-    const fetchLikeData = async () => {
-      const { count, error: countError } = await supabase
-        .from('post_likes')
-        .select('*', { count: 'exact', head: true })
-        .eq('post_id', post.id);
-      if (!countError && count !== null) {
-        setLikesCount(count);
-      }
-      if (currentUser) {
-        const { data, error: likeError } = await supabase
-          .from('post_likes')
-          .select('*')
-          .eq('post_id', post.id)
-          .eq('user_id', currentUser.id)
-          .single();
-        setIsLiked(!!data && !likeError);
-      }
-    };
-    fetchLikeData();
-
-    const channel = supabase
-      .channel(`post-likes-${post.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'post_likes', filter: `post_id=eq.${post.id}` },
-        () => {
-          supabase
-            .from('post_likes')
-            .select('*', { count: 'exact', head: true })
-            .eq('post_id', post.id)
-            .then(({ count, error }) => {
-              if (!error && count !== null) setLikesCount(count);
-            });
-          if (currentUser) {
-            supabase
-              .from('post_likes')
-              .select('*')
-              .eq('post_id', post.id)
-              .eq('user_id', currentUser.id)
-              .single()
-              .then(({ data, error }) => setIsLiked(!!data && !error));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [post.id, currentUser, supabase]);
-
-  const handleToggleLike = async () => {
-    if (readonly || !currentUser) {
-      if (!currentUser) toast.error('Please sign in to like posts');
-      return;
-    }
-    setLikeLoading(true);
-    try {
-      if (isLiked) {
-        await supabase
-          .from('post_likes')
-          .delete()
-          .eq('post_id', post.id)
-          .eq('user_id', currentUser.id);
-        setLikesCount((c) => Math.max(0, c - 1));
-        setIsLiked(false);
-        toast.success('Like removed');
-      } else {
-        await supabase
-          .from('post_likes')
-          .insert({ post_id: post.id, user_id: currentUser.id });
-        setLikesCount((c) => c + 1);
-        setIsLiked(true);
-        toast.success('Post liked!');
-      }
-    } catch (err) {
-      console.error('Failed to toggle like:', err);
-      toast.error('Failed to update like');
-    } finally {
-      setLikeLoading(false);
-    }
-  };
-
   const handleDelete = async () => {
     if (!canDelete || !onPostDeleted) return;
     if (!confirm('Are you sure you want to delete this post?')) return;
@@ -282,8 +199,6 @@ export function PostCard({
       setDeleteLoading(false);
     }
   };
-
-  const hasMedia = post.mediaUrl || (post.mediaUrls && post.mediaUrls.length > 0);
 
   return (
     <div style={cardStyle}>
@@ -318,6 +233,7 @@ export function PostCard({
                     borderRadius: borderRadius.full,
                     objectFit: 'cover',
                   }}
+                  unoptimized
                 />
               ) : (
                 displayAuthor.name.charAt(0).toUpperCase()
@@ -366,8 +282,8 @@ export function PostCard({
         {post.text}
       </p>
 
-      {/* Media Gallery — FULLY RESTORED STYLING */}
-      {hasMedia && allMediaUrls.length > 0 && (
+      {/* Media Gallery */}
+      {hasMedia && (
         <div style={{ marginBottom: spacing.lg }}>
           <div
             style={{
@@ -377,11 +293,11 @@ export function PostCard({
               position: 'relative',
             }}
           >
-            {/* Navigation arrows & counter */}
-            {allMediaUrls.length > 1 && (
+            {/* Navigation & counter */}
+            {mediaUrls.length > 1 && (
               <>
                 <button
-                  onClick={() => setCurrentMediaIndex(prev => prev === 0 ? allMediaUrls.length - 1 : prev - 1)}
+                  onClick={() => setCurrentMediaIndex(prev => prev === 0 ? mediaUrls.length - 1 : prev - 1)}
                   style={{
                     position: 'absolute',
                     left: '10px',
@@ -396,12 +312,12 @@ export function PostCard({
                     cursor: 'pointer',
                     zIndex: 10,
                   }}
-                  aria-label="Previous media"
+                  aria-label="Previous"
                 >
                   ←
                 </button>
                 <button
-                  onClick={() => setCurrentMediaIndex(prev => prev === allMediaUrls.length - 1 ? 0 : prev + 1)}
+                  onClick={() => setCurrentMediaIndex(prev => prev === mediaUrls.length - 1 ? 0 : prev + 1)}
                   style={{
                     position: 'absolute',
                     right: '10px',
@@ -416,7 +332,7 @@ export function PostCard({
                     cursor: 'pointer',
                     zIndex: 10,
                   }}
-                  aria-label="Next media"
+                  aria-label="Next"
                 >
                   →
                 </button>
@@ -433,25 +349,26 @@ export function PostCard({
                     zIndex: 10,
                   }}
                 >
-                  {currentMediaIndex + 1} / {allMediaUrls.length}
+                  {currentMediaIndex + 1} / {mediaUrls.length}
                 </div>
               </>
             )}
 
             {/* Main media */}
-            {/\.(mp4|webm|mov)$/i.test(allMediaUrls[currentMediaIndex]) ? (
+            {/\.(mp4|webm|mov)$/i.test(mediaUrls[currentMediaIndex]) ? (
               <video
-                src={allMediaUrls[currentMediaIndex]}
+                src={mediaUrls[currentMediaIndex]}
                 controls
                 style={{ width: '100%', maxHeight: '400px', objectFit: 'contain' }}
               />
             ) : (
               <Image
-                src={allMediaUrls[currentMediaIndex]}
+                src={mediaUrls[currentMediaIndex]}
                 alt={`Post media ${currentMediaIndex + 1}`}
                 width={800}
                 height={400}
                 style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }}
+                unoptimized
                 onError={(e) => {
                   (e.target as HTMLImageElement).parentElement!.style.display = 'none';
                 }}
@@ -460,7 +377,7 @@ export function PostCard({
           </div>
 
           {/* Thumbnails */}
-          {allMediaUrls.length > 1 && (
+          {mediaUrls.length > 1 && (
             <div
               style={{
                 display: 'flex',
@@ -471,7 +388,7 @@ export function PostCard({
                 WebkitOverflowScrolling: 'touch',
               }}
             >
-              {allMediaUrls.map((url, index) => (
+              {mediaUrls.map((url, index) => (
                 <div
                   key={index}
                   onClick={() => setCurrentMediaIndex(index)}
@@ -511,6 +428,7 @@ export function PostCard({
                         borderRadius: '4px',
                         border: currentMediaIndex === index ? `2px solid ${baseColors.primary}` : 'none',
                       }}
+                      unoptimized
                       onError={(e) => {
                         (e.target as HTMLImageElement).parentElement!.style.display = 'none';
                       }}
@@ -523,56 +441,7 @@ export function PostCard({
         </div>
       )}
 
-      {/* Actions */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: spacing.lg,
-          color: baseColors.text.muted,
-          paddingTop: spacing.md,
-          borderTop: `1px solid ${baseColors.border}`,
-          fontSize: '0.875rem',
-        }}
-      >
-        <button
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.25rem',
-            color: isLiked ? baseColors.primary : baseColors.text.muted,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-          onClick={handleToggleLike}
-          disabled={likeLoading || readonly}
-        >
-          {likeLoading ? (
-            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-          ) : (
-            <Heart size={16} style={{ fill: isLiked ? 'currentColor' : 'none' }} />
-          )}
-          {likesCount}
-        </button>
-        <button
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.25rem',
-            color: baseColors.text.muted,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-          onClick={() => document.getElementById(`comments-${post.id}`)?.scrollIntoView({ behavior: 'smooth' })}
-        >
-          <MessageCircle size={16} />
-          {post.commentsCount}
-        </button>
-      </div>
-
-      {/* 💬 COMMENTS SECTION */}
+      {/* 💬 COMMENTS — kept as requested */}
       <div id={`comments-${post.id}`} style={{ marginTop: spacing.lg }}>
         <CommentsSection
           parentId={post.id}

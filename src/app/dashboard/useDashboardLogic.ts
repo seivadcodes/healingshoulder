@@ -58,13 +58,16 @@ export interface Post {
   griefTypes: GriefType[];
   createdAt: Date;
   likes: number;
+  commentsCount: number;
+  isLiked: boolean;
   isAnonymous: boolean;
   user?: {
-    fullName: string;
-    avatarUrl: string | null;
+    id: string;                    // ✅ added
+    fullName: string | null;       // ✅ allow null
+    avatarUrl: string | null;      // ✅ keep
+    isAnonymous: boolean;          // ✅ added
   };
 }
-
 export interface DashboardUIProps {
   profile: UserProfile | null;
   preferences: UserPreferences;
@@ -215,14 +218,15 @@ export function useDashboardLogic(): DashboardUIProps {
 
     const loadPosts = async () => {
       const { data, error } = await supabase
-        .from('posts')
-        .select(`
-        *,
-        profiles: user_id (
-          full_name,
-          avatar_url
-        )
-      `)
+  .from('posts')
+ .select(`
+  *,
+  comments_count,
+  profiles: user_id (
+    full_name,
+    avatar_url
+  )
+`)
         .eq('user_id', profile.id)
         .order('created_at', { ascending: false })
         .limit(20);
@@ -233,20 +237,24 @@ export function useDashboardLogic(): DashboardUIProps {
         return;
       }
 
-      const mapped = data.map((p) => ({
-        id: p.id,
-        userId: p.user_id,
-        text: p.text,
-        mediaUrls: p.media_urls || undefined,
-        griefTypes: p.grief_types as GriefType[],
-        createdAt: new Date(p.created_at),
-        likes: p.likes_count || 0,
-        isAnonymous: p.is_anonymous,
-        user: p.profiles ? {
-          fullName: p.profiles.full_name,
-          avatarUrl: p.profiles.avatar_url
-        } : undefined
-      }));
+  const mapped = data.map((p) => ({
+  id: p.id,
+  userId: p.user_id,
+  text: p.text,
+  mediaUrls: p.media_urls || undefined,
+  griefTypes: p.grief_types as GriefType[],
+  createdAt: new Date(p.created_at),
+  likes: p.likes_count || 0,
+  commentsCount: p.comments_count || 0,
+  isLiked: false, // ✅ safe default — PostCard will sync real value
+  isAnonymous: p.is_anonymous,
+  user: p.profiles ? {
+  id: p.profiles.id,
+  fullName: p.profiles.full_name || null,
+  avatarUrl: p.profiles.avatar_url,
+  isAnonymous: p.profiles.is_anonymous ?? false,
+} : undefined
+}));
 
       setPosts(mapped);
     };
@@ -386,14 +394,15 @@ export function useDashboardLogic(): DashboardUIProps {
       if (postError) throw postError;
 
       const { data: newPostData, error: fetchError } = await supabase
-        .from('posts')
-        .select(`
-          *,
-          profiles: user_id (
-            full_name,
-            avatar_url
-          )
-        `)
+  .from('posts')
+  .select(`
+  *,
+  comments_count,
+  profiles: user_id (
+    full_name,
+    avatar_url
+  )
+`)
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -401,20 +410,24 @@ export function useDashboardLogic(): DashboardUIProps {
 
       if (fetchError) throw fetchError;
 
-      const newPost: Post = {
-        id: newPostData.id,
-        userId: newPostData.user_id,
-        text: newPostData.text,
-        mediaUrls: newPostData.media_urls || undefined,
-        griefTypes: newPostData.grief_types as GriefType[],
-        createdAt: new Date(newPostData.created_at),
-        likes: newPostData.likes_count || 0,
-        isAnonymous: newPostData.is_anonymous,
-        user: newPostData.profiles ? {
-          fullName: newPostData.profiles.full_name,
-          avatarUrl: newPostData.profiles.avatar_url
-        } : undefined
-      };
+ const newPost: Post = {
+  id: newPostData.id,
+  userId: newPostData.user_id,
+  text: newPostData.text,
+  mediaUrls: newPostData.media_urls || undefined,
+  griefTypes: newPostData.grief_types as GriefType[],
+  createdAt: new Date(newPostData.created_at),
+  likes: newPostData.likes_count || 0,
+  commentsCount: newPostData.comments_count || 0,
+  isLiked: false, // ✅ new posts aren't liked yet
+  isAnonymous: newPostData.is_anonymous,
+  user: newPostData.profiles ? {
+  id: newPostData.profiles.id,
+  fullName: newPostData.profiles.full_name,
+  avatarUrl: newPostData.profiles.avatar_url,
+  isAnonymous: newPostData.profiles.is_anonymous ?? false,
+} : undefined
+};
 
       setPosts(prev => [newPost, ...prev]);
 

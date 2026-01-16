@@ -24,6 +24,7 @@ import type {
 import Image from 'next/image';
 import Link from 'next/link';
 import { CommentsSection } from '@/components/CommentsSection';
+import { PostCard } from '@/components/PostCard';
 
 const griefTypeLabels: Record<GriefType, string> = {
   parent: 'Loss of a Parent',
@@ -1314,230 +1315,25 @@ const PostsSection = ({
       </div>
     ) : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {posts.map((post) => (
-          <PostItem 
-            key={post.id} 
-            post={post} 
-            currentUser={currentUser}
-            currentUserIsAnonymous={currentUserIsAnonymous}
-          />
-        ))}
+       {posts.map((post) => (
+  <PostCard
+    key={post.id}
+    post={post}
+    isOwner={post.userId === currentUser?.id}
+    canDelete={post.userId === currentUser?.id}
+    showAuthor={true}
+    context="feed"
+    onPostDeleted={() => {
+      // Optional: trigger refetch or filter optimistically
+      // For now, we can leave it empty or implement later
+    }}
+  />
+))}
       </div>
     )}
   </section>
 );
-const PostItem = ({ 
-  post, 
-  currentUser, 
-  currentUserIsAnonymous 
-}: { 
-  post: Post; 
-  currentUser: UserProfile | null;
-  currentUserIsAnonymous: boolean;
-}) => {
-  const [copiedId, setCopiedId] = useState(false);
 
-  const formatTimeAgo = (dateString: string) => {
-    const now = new Date();
-    const postDate = new Date(dateString);
-    const diffMs = now.getTime() - postDate.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return postDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const handleCopyId = async () => {
-    await navigator.clipboard.writeText(post.id);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 2000);
-  };
-
-  return (
-    <div style={{ ...baseStyles.card, transition: 'box-shadow 0.2s' }}>
-      {/* Header */}
-      <div style={{ padding: '1rem 1rem 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-            <span style={{ fontWeight: 600, color: '#1c1917' }}>
-              {post.isAnonymous ? 'Anonymous' : post.user?.fullName || 'Community Member'}
-            </span>
-            {post.isAnonymous && (
-              <span style={{
-                backgroundColor: '#fef3c7',
-                color: '#92400e',
-                fontSize: '0.75rem',
-                padding: '0.125rem 0.375rem',
-                borderRadius: '999px',
-                fontWeight: 500
-              }}>
-                Anonymous
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#78716c', fontSize: '0.875rem' }}>
-            <span>{formatTimeAgo(post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt)}</span>
-            {post.griefTypes.length > 0 && (
-              <>
-                <span>•</span>
-                <span>{post.griefTypes.map(t => griefTypeLabels[t]).join(', ')}</span>
-              </>
-            )}
-          </div>
-        </div>
-        
-        {/* Copy ID Button */}
-        <button
-          onClick={handleCopyId}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            opacity: 0.6,
-            transition: 'opacity 0.2s',
-            padding: '0.25rem'
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.6'}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
-            <path d="M16 10h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z" />
-          </svg>
-        </button>
-        {copiedId && (
-          <div style={{
-            position: 'absolute',
-            top: '0.5rem',
-            right: '0.5rem',
-            background: '#16a34a',
-            color: 'white',
-            padding: '0.25rem 0.5rem',
-            borderRadius: '0.25rem',
-            fontSize: '0.75rem',
-            zIndex: 10
-          }}>
-            Copied!
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
-      <div style={{ padding: '1rem' }}>
-        <p style={{ color: '#1c1917', whiteSpace: 'pre-wrap', lineHeight: 1.6, marginBottom: (post.mediaUrls?.length || 0) > 0 ? '1rem' : '0' }}>
-          {post.text}
-        </p>
-
-       {/* Media Grid */}
-{post.mediaUrls && post.mediaUrls.length > 0 && (() => {
-  const mediaUrls = post.mediaUrls!; // Safe because of the guard above
-  return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: mediaUrls.length === 1 
-        ? '1fr' 
-        : mediaUrls.length === 2 || mediaUrls.length === 4 
-          ? '1fr 1fr' 
-          : '1fr 1fr',
-      gap: '0.5rem',
-      marginTop: '0.5rem'
-    }}>
-      {mediaUrls.slice(0, 4).map((url, idx) => (
-        <div 
-          key={idx} 
-          style={{ 
-            position: 'relative',
-            aspectRatio: '1',
-            overflow: 'hidden',
-            borderRadius: '0.375rem'
-          }}
-        >
-          <Image 
-            src={url} 
-            alt={`Media ${idx + 1}`}
-            fill
-            style={{ objectFit: 'cover' }}
-            unoptimized
-          />
-          {mediaUrls.length > 4 && idx === 3 && (
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              background: 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontSize: '1.25rem',
-              fontWeight: 'bold'
-            }}>
-              +{mediaUrls.length - 4}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-})()}
-      </div>
-
-      {/* Footer */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '0.75rem 1rem',
-        borderTop: '1px solid #f5f5f4',
-        fontSize: '0.875rem',
-      }}>
-        <span style={{ color: '#78716c' }}>
-          {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-        <button style={{ 
-          background: 'none', 
-          border: 'none', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '0.25rem',
-          cursor: 'pointer',
-          color: '#78716c'
-        }}>
-          <Heart size={16} />
-          <span>{post.likes || 0}</span>
-        </button>
-      </div>
-
-      {/* 👇 COMMENTS SECTION — FULLY INTEGRATED */}
-      <div style={{ 
-        marginTop: '1.5rem', 
-        paddingTop: '1.5rem', 
-        borderTop: '1px solid #f5f5f4',
-        padding: '0 1rem 1rem'
-      }}>
-        {currentUser && (
-          <CommentsSection
-            parentId={post.id}
-            parentType="post"
-            currentUser={{
-              id: currentUser.id,
-              fullName: currentUser.fullName || 'User',
-              avatarUrl: currentUser.avatarUrl,
-              isAnonymous: currentUserIsAnonymous,
-            }}
-          />
-        )}
-      </div>
-    </div>
-  );
-};
 
 const SupportOptions = ({
   onConnectClick,
