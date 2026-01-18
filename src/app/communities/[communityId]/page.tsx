@@ -8,9 +8,7 @@ import { ShareCommunityButton } from '@/components/ShareCommunityButton';
 import Head from 'next/head';
 import Link from 'next/link';
 import { PostCard } from '@/components/PostCard';
-
 import { PostComposer } from '@/components/PostComposer';
-
 import {
   Users,
   Heart,
@@ -20,14 +18,11 @@ import {
   Settings,
   UserPlus,
   ImageIcon,
-
   X,
   Loader2,
   Upload,
-
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-
 import Image from 'next/image';
 
 // --- Types ---
@@ -41,8 +36,6 @@ interface Community {
   created_at: string;
   cover_photo_url?: string | null;
 }
-
-
 interface Member {
   user_id: string;
   username: string;
@@ -52,7 +45,6 @@ interface Member {
   role: 'member' | 'admin' | 'moderator';
   joined_at: string;
 }
-
 interface Post {
   id: string;
   content: string;
@@ -67,7 +59,6 @@ interface Post {
   comments_count: number;
   is_liked: boolean;
 }
-
 interface Comment {
   id: string;
   content: string;
@@ -80,7 +71,6 @@ interface Comment {
   replies?: Comment[];
   reply_count?: number;
 }
-
 interface Profile {
   id: string;
   full_name: string;
@@ -89,36 +79,23 @@ interface Profile {
   is_anonymous?: boolean;
 }
 
-interface Profile {
-  id: string;
-  full_name: string;
-  avatar_url: string | null;
-  last_online?: string | null;
-  is_anonymous?: boolean;
-}
-
-
-// Supabase response types
 interface CommunityMemberWithProfile {
   role: 'member' | 'admin' | 'moderator';
   joined_at: string;
   user_id: string;
   user: Profile[] | Profile | null;
 }
-
 interface CommunityPost {
   id: string;
   content: string;
   created_at: string;
   community_id: string;
   media_url: string | null;
-  media_urls: string[] | null; // 👈 added this line
+  media_urls: string[] | null;
   likes_count: number;
   comments_count: number;
   user_id: string;
 }
-
-
 
 // --- Shared Styles (Inline) ---
 const baseColors = {
@@ -131,10 +108,8 @@ const baseColors = {
   text: { primary: '#1e293b', secondary: '#64748b', muted: '#94a3b8' },
   status: { online: '#16a34a', offline: '#cbd5e1' },
 };
-
 const spacing = { xs: '0.25rem', sm: '0.5rem', md: '0.75rem', lg: '1rem', xl: '1.25rem', '2xl': '1.5rem' };
 const borderRadius = { sm: '0.25rem', md: '0.5rem', lg: '0.75rem', xl: '1rem', full: '9999px' };
-
 const griefGradients: Record<string, string> = {
   parent: 'linear-gradient(135deg, #fcd34d, #f97316)',
   child: 'linear-gradient(135deg, #d8b4fe, #8b5cf6)',
@@ -147,11 +122,7 @@ const griefGradients: Record<string, string> = {
   suicide: 'linear-gradient(135deg, #ddd6fe, #a78bfa)',
   other: 'linear-gradient(135deg, #e5e7eb, #9ca3af)',
 };
-
-
-
 const defaultGradient = griefGradients.parent;
-
 const buttonStyle = (bg: string, color = 'white') => ({
   background: bg,
   color,
@@ -165,7 +136,6 @@ const buttonStyle = (bg: string, color = 'white') => ({
   fontWeight: 600,
   transition: 'background 0.2s',
 });
-
 const outlineButtonStyle = {
   background: 'transparent',
   color: baseColors.text.primary,
@@ -177,7 +147,6 @@ const outlineButtonStyle = {
   alignItems: 'center',
   gap: spacing.sm,
 };
-
 const cardStyle: React.CSSProperties = {
   background: baseColors.surface,
   borderRadius: borderRadius.lg,
@@ -186,7 +155,6 @@ const cardStyle: React.CSSProperties = {
   boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
   marginBottom: spacing['2xl'],
 };
-
 const pageContainer: React.CSSProperties = {
   minHeight: '100vh',
   background: `linear-gradient(to bottom, ${baseColors.background}, #f5f5f1, #f0f0ee)`,
@@ -195,7 +163,6 @@ const pageContainer: React.CSSProperties = {
   paddingLeft: spacing.lg,
   paddingRight: spacing.lg,
 };
-
 const centerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column' as const,
@@ -205,17 +172,25 @@ const centerStyle: React.CSSProperties = {
   padding: spacing.lg,
 };
 
-const spinnerStyle: React.CSSProperties = {
-  height: '3rem',
-  width: '3rem',
-  borderRadius: borderRadius.full,
-  border: `4px solid ${baseColors.primary}`,
-  borderTopColor: 'transparent',
-  animation: 'spin 1s linear infinite',
-  margin: '0 auto 1rem',
+// --- Skeleton Loader Style ---
+const skeletonStyle: React.CSSProperties = {
+  background: '#f1f5f9',
+  borderRadius: borderRadius.lg,
+  height: '200px',
+  width: '100%',
+  maxWidth: '800px',
+  marginBottom: spacing.xl,
+  position: 'relative',
+  overflow: 'hidden',
 };
+const pulseAnimation = `
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+  }
+`;
 
-// --- Component ---
 export default function CommunityDetailPage() {
   const params = useParams();
   const communityId = params.communityId as string;
@@ -239,20 +214,28 @@ export default function CommunityDetailPage() {
   const [bannerUploading, setBannerUploading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isModalSubmitting, setIsModalSubmitting] = useState(false);
-
-
-
-
+  const composerRef = useRef<HTMLDivElement>(null);
   const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<string>('');
   const [isMobile, setIsMobile] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
-  // Only show the latest comment by default
-
   const [isKebabOpen, setIsKebabOpen] = useState(false);
   const kebabMenuRef = useRef<HTMLDivElement>(null);
+  const [memberStatusResolved, setMemberStatusResolved] = useState(false); // 👈 NEW
 
+  // Inject global styles once
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      const existing = document.getElementById('global-pulse-styles');
+      if (!existing) {
+        const style = document.createElement('style');
+        style.id = 'global-pulse-styles';
+        style.innerHTML = pulseAnimation;
+        document.head.appendChild(style);
+      }
+    }
+  }, []);
 
   const handleModalPostSubmit = async (text: string, mediaFiles: File[]) => {
     if (!user || !community) {
@@ -261,9 +244,8 @@ export default function CommunityDetailPage() {
     }
     setIsModalSubmitting(true);
     try {
-      // ✅ mediaFiles is already File[] — pass directly
       const newPost = await createPostWithMedia(text, mediaFiles, user.id);
-      setPosts(prev => [newPost, ...prev]);
+      setPosts((prev) => [newPost, ...prev]);
       setIsModalOpen(false);
       toast.success('Post shared with the community!');
     } catch (err) {
@@ -273,49 +255,33 @@ export default function CommunityDetailPage() {
       setIsModalSubmitting(false);
     }
   };
+
   const formatRecentActivity = (dateString: string): string => {
     const now = new Date();
     const created = new Date(dateString);
     const diffMs = now.getTime() - created.getTime();
     const seconds = Math.floor(diffMs / 1000);
     if (seconds < 60) return 'Just now';
-
     const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) {
-      return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
-    }
-
+    if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
     const hours = Math.floor(minutes / 60);
-    if (hours < 24) {
-      return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
-    }
-
+    if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
     const days = Math.floor(hours / 24);
-    if (days < 7) {
-      return days === 1 ? '1 day ago' : `${days} days ago`;
-    }
-
+    if (days < 7) return days === 1 ? '1 day ago' : `${days} days ago`;
     const weeks = Math.floor(days / 7);
-    if (weeks < 4) {
-      return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
-    }
-
+    if (weeks < 4) return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
     const months = Math.floor(days / 30);
-    if (months < 12) {
-      return months === 1 ? '1 month ago' : `${months} months ago`;
-    }
-
+    if (months < 12) return months === 1 ? '1 month ago' : `${months} months ago`;
     const years = Math.floor(days / 365);
     return years === 1 ? '1 year ago' : `${years} years ago`;
   };
+
   const isUserOnline = useCallback((lastOnline: string | null): boolean => {
     if (!lastOnline) return false;
     const lastOnlineDate = new Date(lastOnline);
     const now = new Date();
     return now.getTime() - lastOnlineDate.getTime() < 5 * 60 * 1000;
-  }, []); // 👈 empty dependency array — it never changes
-
-
+  }, []);
 
   // Close kebab menu when clicking outside
   useEffect(() => {
@@ -324,11 +290,9 @@ export default function CommunityDetailPage() {
         setIsKebabOpen(false);
       }
     };
-
     if (isKebabOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
-
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
@@ -337,7 +301,6 @@ export default function CommunityDetailPage() {
   useEffect(() => {
     const fetchData = async () => {
       if (!communityId) return;
-
       try {
         setLoading(true);
         setError(null);
@@ -348,7 +311,6 @@ export default function CommunityDetailPage() {
           .select('*')
           .eq('id', communityId)
           .single();
-
         if (communityError) throw new Error(`Failed to fetch community: ${communityError.message}`);
         if (!communityData) throw new Error('Community not found');
 
@@ -362,50 +324,45 @@ export default function CommunityDetailPage() {
           .from('community_members')
           .select('*', { count: 'exact', head: true })
           .eq('community_id', communityId);
-
         if (countError) throw new Error(`Failed to count members: ${countError.message}`);
 
-        // 3. ✅ FETCH MEMBERS HERE — BEFORE onlineCount
+        // 3. Fetch members
         const { data: membersData, error: membersError } = await supabase
           .from('community_members')
           .select(`
-          role,
-          joined_at,
-          user_id,
-          user:profiles!left (
-            id,
-            full_name,
-            avatar_url,
-            last_online,
-            is_anonymous
-          )
-        `)
+            role,
+            joined_at,
+            user_id,
+            user:profiles!left (
+              id,
+              full_name,
+              avatar_url,
+              last_online,
+              is_anonymous
+            )
+          `)
           .eq('community_id', communityId)
           .order('joined_at', { ascending: true });
-
         if (membersError) throw membersError;
 
-        // 4. ✅ NOW calculate onlineCount — membersData is available
+        // 4. Calculate online count
         const onlineCount = membersData.filter((member: CommunityMemberWithProfile) => {
           const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
           return isUserOnline(profile?.last_online || null);
         }).length;
 
-        // 5. Build community object with correct counts
         const communityWithPhoto = {
           ...communityData,
           cover_photo_url: coverPhotoUrl,
           member_count: count || 0,
-          online_count: onlineCount, // ✅ now safe and accurate
+          online_count: onlineCount,
         };
-
         setCommunity(communityWithPhoto);
 
-        // 6. Format and set members
+        // 5. Format members
         const formattedMembers = membersData.map((member: CommunityMemberWithProfile) => {
           const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
           const isAnonymous = profile?.is_anonymous || false;
-
           return {
             user_id: member.user_id,
             username: isAnonymous ? 'Anonymous' : profile?.full_name || 'Anonymous',
@@ -416,10 +373,11 @@ export default function CommunityDetailPage() {
             joined_at: member.joined_at,
           };
         });
-
         setMembers(formattedMembers);
 
-        // 7. Check if current user is a member
+        // 6. Check membership status
+        let isCurrentUserMember = false;
+        let currentUserRole: typeof userRole = null;
         if (user) {
           const { data: memberData } = await supabase
             .from('community_members')
@@ -427,46 +385,38 @@ export default function CommunityDetailPage() {
             .eq('community_id', communityId)
             .eq('user_id', user.id)
             .single();
-
           if (memberData) {
-            setIsMember(true);
-            setUserRole(memberData.role);
-          } else {
-            setIsMember(false);
-            setUserRole(null);
+            isCurrentUserMember = true;
+            currentUserRole = memberData.role;
           }
-        } else {
-          setIsMember(false);
-          setUserRole(null);
         }
+        setIsMember(isCurrentUserMember);
+        setUserRole(currentUserRole);
+        setMemberStatusResolved(true); // 👈 Critical: only now do we know member status
 
-        // 8. Fetch posts
+        // 7. Fetch posts
         const { data: postData, error: postError } = await supabase
           .from('community_posts')
           .select(`
-          id,
-          content,
-          created_at,
-          community_id,
-          media_url,
-    media_urls,      
-
-          likes_count,
-          comments_count,
-          user_id
-        `)
+            id,
+            content,
+            created_at,
+            community_id,
+            media_url,
+            media_urls,
+            likes_count,
+            comments_count,
+            user_id
+          `)
           .eq('community_id', communityId)
           .order('created_at', { ascending: false });
-
         if (postError) throw postError;
 
         const userIds = [...new Set(postData.map((post: CommunityPost) => post.user_id))];
-        const { data: profilesData, error: profilesError } = await supabase
+        const { data: profilesData } = await supabase
           .from('profiles')
           .select('id, full_name, avatar_url, is_anonymous')
           .in('id', userIds);
-
-        if (profilesError) console.warn('Error fetching profiles for posts:', profilesError);
 
         const profilesMap = new Map();
         profilesData?.forEach((profile: Profile) => {
@@ -474,30 +424,25 @@ export default function CommunityDetailPage() {
         });
 
         const postsWithLikes = postData.map((post: CommunityPost) => {
-  const userProfile = profilesMap.get(post.user_id) || {};
-  const isAnonymous = userProfile.is_anonymous || false;
-  return {
-    id: post.id,
-    content: post.content,
-    media_url: post.media_url,
-    media_urls: post.media_urls, // ✅ now properly typed
-    created_at: post.created_at,
-    user_id: post.user_id,
-    username: isAnonymous ? 'Anonymous' : userProfile.full_name || 'Anonymous',
-    avatar_url: isAnonymous ? null : userProfile.avatar_url || null,
-    community_id: post.community_id,
-    likes_count: post.likes_count || 0,
-    comments_count: post.comments_count || 0,
-    is_liked: false,
-  };
-});
-        // 9. Fetch like status if user is logged in
-
+          const userProfile = profilesMap.get(post.user_id) || {};
+          const isAnonymous = userProfile.is_anonymous || false;
+          return {
+            id: post.id,
+            content: post.content,
+            media_url: post.media_url,
+            media_urls: post.media_urls,
+            created_at: post.created_at,
+            user_id: post.user_id,
+            username: isAnonymous ? 'Anonymous' : userProfile.full_name || 'Anonymous',
+            avatar_url: isAnonymous ? null : userProfile.avatar_url || null,
+            community_id: post.community_id,
+            likes_count: post.likes_count || 0,
+            comments_count: post.comments_count || 0,
+            is_liked: false,
+          };
+        });
 
         setPosts(postsWithLikes);
-
-        // 10. Fetch latest comment for each post
-
       } catch (err) {
         console.error('Error fetching community:', err);
         const message = err instanceof Error ? err.message : 'Failed to load community data';
@@ -508,27 +453,25 @@ export default function CommunityDetailPage() {
     };
 
     fetchData();
-  }, [communityId, user, supabase, isUserOnline]); // ✅ include isUserOnline in deps
+  }, [communityId, user, supabase, isUserOnline]);
 
+  // Refresh members & online count every 30s
   useEffect(() => {
     if (!communityId) return;
-
     const fetchMembersAndOnlineCount = async () => {
       const { data: membersData, error } = await supabase
         .from('community_members')
         .select(`
-        role,
-        joined_at,
-        user_id,
-        user:profiles!left (id, full_name, avatar_url, last_online, is_anonymous)
-      `)
+          role,
+          joined_at,
+          user_id,
+          user:profiles!left (id, full_name, avatar_url, last_online, is_anonymous)
+        `)
         .eq('community_id', communityId);
-
       if (error) {
         console.error('Failed to refresh members:', error);
         return;
       }
-
       const formattedMembers = membersData.map((member) => {
         const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
         const isAnonymous = profile?.is_anonymous || false;
@@ -542,50 +485,38 @@ export default function CommunityDetailPage() {
           joined_at: member.joined_at,
         };
       });
-
       setMembers(formattedMembers);
-
-      const newOnlineCount = formattedMembers.filter(m => m.is_online).length;
-      setCommunity(prev => prev ? { ...prev, online_count: newOnlineCount } : null);
+      const newOnlineCount = formattedMembers.filter((m) => m.is_online).length;
+      setCommunity((prev) => (prev ? { ...prev, online_count: newOnlineCount } : null));
     };
-
     fetchMembersAndOnlineCount();
     const interval = setInterval(fetchMembersAndOnlineCount, 30_000);
     return () => clearInterval(interval);
   }, [communityId, supabase, isUserOnline]);
 
+  // Update last_online every 45s
   useEffect(() => {
     if (!user) return;
-
     const updateLastOnline = async () => {
-      await supabase
-        .from('profiles')
-        .update({ last_online: new Date().toISOString() })
-        .eq('id', user.id);
+      await supabase.from('profiles').update({ last_online: new Date().toISOString() }).eq('id', user.id);
     };
-
-    updateLastOnline(); // on mount
-    const interval = setInterval(updateLastOnline, 45_000); // every 45s
+    updateLastOnline();
+    const interval = setInterval(updateLastOnline, 45_000);
     return () => clearInterval(interval);
   }, [user, supabase]);
 
   const reportComment = async (commentId: string, reason: string) => {
     if (!user || !reason.trim()) return;
-
     try {
-      const { error } = await supabase
-        .from('reports')
-        .insert({
-          target_type: 'comment',
-          target_id: commentId,
-          reporter_id: user.id,
-          reason: reason.trim(),
-          created_at: new Date().toISOString(),
-          status: 'pending',
-        });
-
+      const { error } = await supabase.from('reports').insert({
+        target_type: 'comment',
+        target_id: commentId,
+        reporter_id: user.id,
+        reason: reason.trim(),
+        created_at: new Date().toISOString(),
+        status: 'pending',
+      });
       if (error) throw error;
-
       toast.success('Comment reported successfully');
       setReportingCommentId(null);
       setReportReason('');
@@ -594,23 +525,6 @@ export default function CommunityDetailPage() {
       toast.error('Failed to report comment');
     }
   };
-  // In your page component, add this once:
-  useEffect(() => {
-    // Only run on client
-    if (typeof document !== 'undefined') {
-      const existing = document.getElementById('global-spin-styles');
-      if (!existing) {
-        const style = document.createElement('style');
-        style.id = 'global-spin-styles';
-        style.innerHTML = `
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `;
-        document.head.appendChild(style);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -619,46 +533,37 @@ export default function CommunityDetailPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-
-
   const handleMembership = async () => {
     if (!user) {
       router.push(`/auth?redirectTo=/communities/${communityId}`);
       return;
     }
-
     if (isMember) {
       const { error } = await supabase
         .from('community_members')
         .delete()
         .eq('community_id', communityId)
         .eq('user_id', user.id);
-
       if (error) {
         console.error('Error leaving community:', error);
         setError('Failed to leave community');
         return;
       }
-
       setIsMember(false);
       setUserRole(null);
       setCommunity((prev) => (prev ? { ...prev, member_count: prev.member_count - 1 } : null));
     } else {
-      const { error } = await supabase
-        .from('community_members')
-        .insert({
-          community_id: communityId,
-          user_id: user.id,
-          joined_at: new Date().toISOString(),
-          role: 'member',
-        });
-
+      const { error } = await supabase.from('community_members').insert({
+        community_id: communityId,
+        user_id: user.id,
+        joined_at: new Date().toISOString(),
+        role: 'member',
+      });
       if (error) {
         console.error('Error joining community:', error);
         setError('Failed to join community');
         return;
       }
-
       setIsMember(true);
       setUserRole('member');
       setCommunity((prev) => (prev ? { ...prev, member_count: prev.member_count + 1 } : null));
@@ -667,11 +572,8 @@ export default function CommunityDetailPage() {
 
   const createPostWithMedia = async (content: string, files: File[], userId: string) => {
     if (!community) throw new Error('Community not loaded');
-
-    let insertedPostId: string | null = null; // 👈 Track ID for cleanup
-
+    let insertedPostId: string | null = null;
     try {
-      // Insert post with empty media_urls
       const { data: postData, error: postError } = await supabase
         .from('community_posts')
         .insert({
@@ -679,26 +581,22 @@ export default function CommunityDetailPage() {
           user_id: userId,
           content: content.trim(),
           created_at: new Date().toISOString(),
-          media_urls: [], // start empty
+          media_urls: [],
         })
         .select(`
-        id,
-        content,
-        created_at,
-        community_id,
-        media_urls,
-        user_id
-      `)
+          id,
+          content,
+          created_at,
+          community_id,
+          media_urls,
+          user_id
+        `)
         .single();
-
       if (postError) throw postError;
-
-      insertedPostId = postData.id; // ✅ Save for cleanup
+      insertedPostId = postData.id;
 
       let mediaUrls: string[] = [];
-
       if (files.length > 0) {
-        // Validate files
         const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime'];
         for (const file of files) {
           if (!allowedTypes.includes(file.type)) {
@@ -710,7 +608,6 @@ export default function CommunityDetailPage() {
           }
         }
 
-        // Upload all files
         const uploadPromises = files.map(async (file, idx) => {
           const fileExt = file.name.split('.').pop();
           const fileName = `${communityId}/posts/${postData.id}_${idx}.${fileExt}`;
@@ -721,10 +618,8 @@ export default function CommunityDetailPage() {
           const { data } = supabase.storage.from('communities').getPublicUrl(fileName);
           return data.publicUrl;
         });
-
         mediaUrls = await Promise.all(uploadPromises);
 
-        // Update post with full media_urls array
         const { error: updateError } = await supabase
           .from('community_posts')
           .update({ media_urls: mediaUrls })
@@ -737,7 +632,6 @@ export default function CommunityDetailPage() {
         .select('full_name, avatar_url, is_anonymous')
         .eq('id', userId)
         .single();
-
       const isAnonymous = userData?.is_anonymous || false;
 
       return {
@@ -756,20 +650,19 @@ export default function CommunityDetailPage() {
       };
     } catch (error) {
       console.error('Post creation failed:', error);
-      // ✅ Clean up using tracked ID
       if (insertedPostId) {
         await supabase.from('community_posts').delete().eq('id', insertedPostId);
       }
       throw error;
     }
   };
+
   const handleCreatePost = async (e: FormEvent) => {
     e.preventDefault();
     if (!user || !community || (!newPostContent.trim() && newPostMedia.length === 0)) return;
     setError(null);
     setUploadingMedia(newPostMedia.length > 0);
     try {
-      // ✅ Pass newPostMedia (which is File[]) directly
       const newPost = await createPostWithMedia(newPostContent.trim(), newPostMedia, user.id);
       setPosts((prev) => [newPost, ...prev]);
       setNewPostContent('');
@@ -777,39 +670,26 @@ export default function CommunityDetailPage() {
       toast.success('Post created successfully!');
     } catch (err) {
       console.error('Error creating post:', err);
-      const errorMessage = err instanceof Error
-        ? err.message
-        : typeof err === 'string'
-          ? err
-          : 'Failed to create post';
+      const errorMessage =
+        err instanceof Error ? err.message : typeof err === 'string' ? err : 'Failed to create post';
       setError(errorMessage);
       toast.error('Failed to create post');
     }
   };
 
-
-
   const updateBanner = async (file: File) => {
     if (!community) return;
-
     setBannerUploading(true);
-
     try {
       if (!file.type.startsWith('image/')) throw new Error('Only image files are allowed');
-
       if (file.size > 5 * 1024 * 1024) throw new Error('Image must be less than 5MB');
-
       const fileExt = file.name.split('.').pop();
       const fileName = `${communityId}/banner.${fileExt || 'jpg'}`;
-
       const { error: uploadError } = await supabase.storage
         .from('communities')
         .upload(fileName, file, { upsert: true });
-
       if (uploadError) throw uploadError;
-
       const newBannerUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/communities/${fileName}?t=${Date.now()}`;
-
       setCommunity((prev) => (prev ? { ...prev, cover_photo_url: newBannerUrl } : null));
       toast.success('Banner updated successfully!');
       setBannerModalOpen(false);
@@ -829,20 +709,10 @@ export default function CommunityDetailPage() {
 
   const deletePost = async (postId: string) => {
     setDeletingPostId(postId);
-
     try {
-      const { error } = await supabase
-        .from('community_posts')
-        .delete()
-        .eq('id', postId)
-        .eq('community_id', communityId);
-
+      const { error } = await supabase.from('community_posts').delete().eq('id', postId).eq('community_id', communityId);
       if (error) throw error;
-
       setPosts((prev) => prev.filter((post) => post.id !== postId));
-
-
-
       toast.success('Post deleted successfully');
     } catch (error: unknown) {
       console.error('Post deletion failed:', error);
@@ -859,43 +729,33 @@ export default function CommunityDetailPage() {
   const handleBannerFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     e.target.value = '';
-
     if (!file.type.startsWith('image/')) {
       setBannerUploadError('Please upload an image file (JPEG, PNG, GIF, etc.)');
       return;
     }
-
     if (file.size > 5 * 1024 * 1024) {
       setBannerUploadError('Image must be less than 5MB');
       return;
     }
-
     setBannerFile(file);
     setBannerUploadError(null);
-
     const reader = new FileReader();
     reader.onloadend = () => {
       setBannerPreview(reader.result as string);
     };
-
     reader.readAsDataURL(file);
   };
 
   const handlePostMediaSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-
-    // Optional: limit total count (e.g., max 5)
     if (newPostMedia.length + files.length > 5) {
       setError('You can upload up to 5 files per post.');
       return;
     }
-
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime'];
     const maxSizeMB = (type: string) => (type.startsWith('video/') ? 15 : 5);
-
     for (const file of files) {
       if (!allowedTypes.includes(file.type)) {
         setError('Unsupported file type. Please upload JPG, PNG, GIF, MP4 or MOV files.');
@@ -906,22 +766,32 @@ export default function CommunityDetailPage() {
         return;
       }
     }
-
     setNewPostMedia((prev) => [...prev, ...files]);
     setError(null);
   };
+
   const removePostMedia = () => {
     setNewPostMedia([]);
     setError(null);
   };
 
-  // --- UI Rendering (with inline styles) ---
+  // --- UI Rendering ---
   if (loading) {
     return (
       <div style={pageContainer}>
         <div style={centerStyle}>
-          <div style={spinnerStyle}></div>
-          <p style={{ color: baseColors.text.secondary }}>Loading community...</p>
+          {/* Professional Skeleton Loader */}
+          <div style={{ ...skeletonStyle, animation: 'pulse 1.5s ease-in-out infinite' }} />
+          <div
+            style={{
+              height: '24px',
+              width: '200px',
+              background: '#f1f5f9',
+              borderRadius: borderRadius.md,
+              marginTop: spacing.md,
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}
+          ></div>
         </div>
       </div>
     );
@@ -945,10 +815,7 @@ export default function CommunityDetailPage() {
             />
             <meta
               property="og:image"
-              content={
-                community.cover_photo_url ||
-                `https://healingshoulder.site/og-community-default.jpg`
-              }
+              content={community.cover_photo_url || `https://healingshoulder.site/og-community-default.jpg`}
             />
             <meta name="twitter:card" content="summary_large_image" />
           </Head>
@@ -1006,103 +873,34 @@ export default function CommunityDetailPage() {
     );
   }
 
+  // Wait until we know member status before showing anything that depends on it
+  if (!memberStatusResolved) {
+    return (
+      <div style={pageContainer}>
+        <div style={centerStyle}>
+          <div style={{ ...skeletonStyle, animation: 'pulse 1.5s ease-in-out infinite' }} />
+        </div>
+      </div>
+    );
+  }
+
   const gradient = griefGradients[community.grief_type] || defaultGradient;
   const isAdmin = userRole === 'admin';
   const isModerator = userRole === 'moderator' || isAdmin;
   const authUsername = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Anonymous';
 
-  const renderCommentPreview = (comment: Comment) => {
-    return (
-      <div style={{ display: 'flex', gap: spacing.md, marginBottom: spacing.md }}>
-        <div
-          style={{
-            width: '2rem',
-            height: '2rem',
-            borderRadius: borderRadius.full,
-            background: gradient,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            fontSize: '0.75rem',
-            fontWeight: 600,
-            color: 'white',
-            position: 'relative', // Required for absolute positioning of Image
-          }}
-        >
-          {comment.avatar_url ? (
-            <Image
-              src={comment.avatar_url}
-              alt={comment.username}
-              fill
-              sizes="(max-width: 768px) 48px, 48px" // Add this line
-              style={{ borderRadius: borderRadius.full, objectFit: 'cover' }}
-            />
-          ) : (
-            comment.username[0]?.toUpperCase() || 'U'
-          )}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              background: '#f8fafc',
-              borderRadius: borderRadius.md,
-              padding: spacing.md,
-            }}
-          >
-            {comment.user_id && !comment.username.toLowerCase().includes('anonymous') ? (
-              <Link
-                href={`/profile/${comment.user_id}`}
-                style={{
-                  fontWeight: 600,
-                  color: baseColors.primary,
-                  fontSize: '0.875rem',
-                  textDecoration: 'none',
-                }}
-                aria-label={`View ${comment.username}'s profile`}
-              >
-                {comment.username}
-              </Link>
-            ) : (
-              <span style={{ fontWeight: 600, color: baseColors.text.primary, fontSize: '0.875rem' }}>
-                {comment.username}
-              </span>
-            )}
-            <p style={{ color: baseColors.text.muted, fontSize: '0.75rem', marginTop: '0.125rem' }}>
-              {formatRecentActivity(comment.created_at)}
-            </p>
-            <p
-              style={{
-                color: baseColors.text.primary,
-                fontSize: '0.875rem',
-                marginTop: spacing.sm,
-                whiteSpace: 'pre-line',
-              }}
-            >
-              {comment.content}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const transformPostForCard = (post: Post) => {
-    // Keep griefTypes exactly as you had it — no changes
     const validGriefTypes = [
       'parent', 'child', 'spouse', 'sibling', 'friend',
       'pet', 'miscarriage', 'caregiver', 'suicide', 'other'
     ] as const;
-
     type GriefType = typeof validGriefTypes[number];
-
-    // Later...
     const griefType = community?.grief_type;
     const griefTypes: GriefType[] =
-      (griefType && validGriefTypes.some(type => type === griefType))
+      griefType && validGriefTypes.some(type => type === griefType)
         ? [griefType as GriefType]
         : ['other'];
-    // ✅ FIX MEDIA: Use post.media_urls if available, fallback to post.media_url
+
     const mediaUrls = Array.isArray(post.media_urls) && post.media_urls.length > 0
       ? post.media_urls.filter(Boolean)
       : post.media_url
@@ -1113,8 +911,8 @@ export default function CommunityDetailPage() {
       id: post.id,
       userId: post.user_id,
       text: post.content,
-      mediaUrl: mediaUrls[0] || undefined, // first item or undefined
-      mediaUrls, // ✅ now includes all uploaded images
+      mediaUrl: mediaUrls[0] || undefined,
+      mediaUrls,
       griefTypes,
       createdAt: new Date(post.created_at),
       likes: post.likes_count,
@@ -1129,59 +927,72 @@ export default function CommunityDetailPage() {
       },
     };
   };
+
+  // Media gallery route — adjust as needed
+  const mediaGalleryRoute = `/communities/${communityId}/media`;
+
   return (
     <div style={pageContainer}>
-      {/* Banner */}
-      <div
-        style={{
-          position: 'relative',
-          height: isMobile ? '15rem' : '38rem', // 👈 Responsive height!
-          overflow: 'hidden',
-          marginBottom: spacing['2xl'],
-          borderRadius: borderRadius.md,
-        }}
-      >
-        <Image
-          src={
-            community.cover_photo_url ||
-            `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(community.name)}`
-          }
-          alt={community.name}
-          fill
-          sizes="100vw"
-          style={{ objectFit: 'cover' }}
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(
-              community.name
-            )}`;
-          }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
-          }}
-        ></div>
-        {isAdmin && (
-          <button
-            onClick={() => setBannerModalOpen(true)}
+      {/* Banner — ONLY shown to non-members */}
+      {!isMember && (
+        <Link href={mediaGalleryRoute} passHref>
+          <div
             style={{
-              position: 'absolute',
-              bottom: spacing.lg,
-              right: spacing.lg,
-              ...outlineButtonStyle,
-              background: 'rgba(0,0,0,0.3)',
-              color: 'white',
-              backdropFilter: 'blur(4px)',
-              fontSize: '0.875rem',
+              position: 'relative',
+              height: isMobile ? '15rem' : '38rem',
+              overflow: 'hidden',
+              marginBottom: spacing['2xl'],
+              borderRadius: borderRadius.md,
+              cursor: 'pointer',
             }}
           >
-            <ImageIcon size={18} />
-            Edit Banner
-          </button>
-        )}
-      </div>
+            <Image
+              src={
+                community.cover_photo_url ||
+                `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(community.name)}`
+              }
+              alt={community.name}
+              fill
+              sizes="100vw"
+              style={{ objectFit: 'cover' }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(
+                  community.name
+                )}`;
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
+              }}
+            ></div>
+            {isAdmin && (
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  setBannerModalOpen(true);
+                }}
+                style={{
+                  position: 'absolute',
+                  bottom: spacing.lg,
+                  right: spacing.lg,
+                  ...outlineButtonStyle,
+                  background: 'rgba(0,0,0,0.3)',
+                  color: 'white',
+                  backdropFilter: 'blur(4px)',
+                  fontSize: '0.875rem',
+                  zIndex: 2,
+                }}
+              >
+                <ImageIcon size={18} />
+                Edit Banner
+              </button>
+            )}
+          </div>
+        </Link>
+      )}
 
       {/* Responsive container: column on mobile, row on desktop */}
       <div
@@ -1195,12 +1006,9 @@ export default function CommunityDetailPage() {
       >
         {/* Main Feed */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
-
-
           {/* Community Header */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg, position: 'relative' }}>
-
               {/* Three-dot menu (visible only to members) */}
               {user && isMember && (
                 <div
@@ -1224,7 +1032,6 @@ export default function CommunityDetailPage() {
                   >
                     <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>⋯</span>
                   </button>
-
                   {isKebabOpen && (
                     <div
                       style={{
@@ -1270,43 +1077,46 @@ export default function CommunityDetailPage() {
               )}
 
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing.lg }}>
-                {/* Banner Thumbnail or Fallback Icon */}
-                <div
-                  style={{
-                    width: '4rem',
-                    height: '4rem',
-                    borderRadius: borderRadius.md,
-                    overflow: 'hidden',
-                    flexShrink: 0,
-                    position: 'relative',
-                  }}
-                >
-                  {community.cover_photo_url ? (
-                    <Image
-                      src={community.cover_photo_url}
-                      alt={`${community.name} banner`}
-                      fill
-                      style={{ objectFit: 'cover' }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(community.name)}`;
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        background: gradient,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                      }}
-                    >
-                      <Users size={32} />
-                    </div>
-                  )}
-                </div>
+                {/* Banner Thumbnail or Fallback Icon — NOW CLICKABLE */}
+                <Link href={mediaGalleryRoute} passHref>
+                  <div
+                    style={{
+                      width: '4rem',
+                      height: '4rem',
+                      borderRadius: borderRadius.md,
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                      position: 'relative',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {community.cover_photo_url ? (
+                      <Image
+                        src={community.cover_photo_url}
+                        alt={`${community.name} banner`}
+                        fill
+                        style={{ objectFit: 'cover' }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(community.name)}`;
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          background: gradient,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                        }}
+                      >
+                        <Users size={32} />
+                      </div>
+                    )}
+                  </div>
+                </Link>
 
                 {/* Community Info */}
                 <div style={{ minWidth: 0, flex: 1 }}>
@@ -1351,7 +1161,6 @@ export default function CommunityDetailPage() {
                     </button>
                   )
                 ) : null}
-
                 {isAdmin && (
                   <button
                     onClick={() => toast('Community settings coming soon!')}
@@ -1364,23 +1173,25 @@ export default function CommunityDetailPage() {
             </div>
           </div>
 
-
           {/* Create Post */}
           {isMember && (
-            <PostComposer
-              onSubmit={async (text: string, mediaFiles: File[]) => {
-                if (!user) return;
-                const newPost = await createPostWithMedia(text, mediaFiles, user.id); // ✅ pass full array
-                setPosts(prev => [newPost, ...prev]);
-                toast.success('Post shared!');
-              }}
-              isSubmitting={uploadingMedia}
-              placeholder={`What's on your mind, ${authUsername}? Share your thoughts...`}
-              avatarUrl={user?.user_metadata?.avatar_url || null}
-              displayName={authUsername}
-              maxFiles={4} // or 5, as you prefer
-            />
+            <div ref={composerRef}>
+              <PostComposer
+                onSubmit={async (text: string, mediaFiles: File[]) => {
+                  if (!user) return;
+                  const newPost = await createPostWithMedia(text, mediaFiles, user.id);
+                  setPosts((prev) => [newPost, ...prev]);
+                  toast.success('Post shared!');
+                }}
+                isSubmitting={uploadingMedia}
+                placeholder={`What's on your mind, ${authUsername}? Share your thoughts...`}
+                avatarUrl={user?.user_metadata?.avatar_url || null}
+                displayName={authUsername}
+                maxFiles={4}
+              />
+            </div>
           )}
+
           {/* Posts */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
             {posts.length === 0 ? (
@@ -1408,9 +1219,7 @@ export default function CommunityDetailPage() {
                   post={transformPostForCard(post)}
                   canDelete={isModerator || post.user_id === user?.id}
                   onPostDeleted={() => {
-                    setPosts(prev => prev.filter(p => p.id !== post.id));
-                    // Optional: clean up comments if you still track them elsewhere
-
+                    setPosts((prev) => prev.filter((p) => p.id !== post.id));
                   }}
                   context="community"
                   showAuthor={true}
@@ -1418,7 +1227,6 @@ export default function CommunityDetailPage() {
               ))
             )}
           </div>
-
         </div>
 
         {/* Sidebar */}
@@ -1437,7 +1245,8 @@ export default function CommunityDetailPage() {
                   communityDescription={community.description || ''}
                   style={{ ...outlineButtonStyle, fontSize: '0.875rem', padding: `${spacing.sm} ${spacing.sm}` }}
                 />
-              )}        </div>
+              )}
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, maxHeight: '500px', overflowY: 'auto' }}>
               {members.map((member) => (
                 <div
@@ -1525,7 +1334,9 @@ export default function CommunityDetailPage() {
                           {member.username}
                         </span>
                       )}
-                      <p style={{ color: baseColors.text.muted, fontSize: '0.75rem' }}>Joined {formatRecentActivity(member.joined_at)}</p>
+                      <p style={{ color: baseColors.text.muted, fontSize: '0.75rem' }}>
+                        Joined {formatRecentActivity(member.joined_at)}
+                      </p>
                     </div>
                   </div>
                   {member.role !== 'member' && (
@@ -1533,20 +1344,18 @@ export default function CommunityDetailPage() {
                       style={{
                         fontSize: '0.6875rem',
                         fontWeight: 600,
-                        // 👇 Reduce padding to avoid pushing height up
-                        padding: '0.0625rem 0.375rem', // 1px top/bottom, 6px left/right
+                        padding: '0.0625rem 0.375rem',
                         borderRadius: '0.375rem',
                         background: member.role === 'admin' ? '#fef9c3' : '#ede9fe',
                         color: member.role === 'admin' ? '#92400e' : '#6d28d9',
                         border: member.role === 'admin' ? '1px solid #fde68a' : '1px solid #ddd6fe',
-                        lineHeight: '1.2', // 👈 Match text line height better
+                        lineHeight: '1.2',
                         whiteSpace: 'nowrap',
-
-                        alignSelf: 'center', // 👈 Key fix: aligns with parent's text
-                        height: '20px',     // 👈 Explicit height
+                        alignSelf: 'center',
+                        height: '20px',
                         display: 'flex',
-                        alignItems: 'center', // 👈 Center content vertically inside badge
-                        justifyContent: 'center', // 👈 Optional: centers text horizontally too
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
                       {member.role}
@@ -1640,7 +1449,9 @@ export default function CommunityDetailPage() {
                 alignItems: 'center',
               }}
             >
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: baseColors.text.primary }}>Update Community Banner</h3>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: baseColors.text.primary }}>
+                Update Community Banner
+              </h3>
               <button
                 onClick={() => setBannerModalOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: baseColors.text.muted }}
@@ -1702,7 +1513,9 @@ export default function CommunityDetailPage() {
                     <p style={{ color: baseColors.text.secondary }}>
                       Upload a banner image
                       <br />
-                      <span style={{ fontSize: '0.75rem', color: baseColors.text.muted }}>Recommended: 1200x300px, max 5MB</span>
+                      <span style={{ fontSize: '0.75rem', color: baseColors.text.muted }}>
+                        Recommended: 1200x300px, max 5MB
+                      </span>
                     </p>
                   </div>
                 )}
@@ -1757,7 +1570,7 @@ export default function CommunityDetailPage() {
         </div>
       )}
 
-      {/* Report Comment Modal - MOVED OUTSIDE BANNER MODAL */}
+      {/* Report Comment Modal */}
       {reportingCommentId && (
         <div
           style={{
@@ -1843,18 +1656,8 @@ export default function CommunityDetailPage() {
               </div>
             </div>
           </div>
-
         </div>
       )}
-
-      {/* Animation */}
-      <style jsx>{`
-        @keyframes spin {
-          to {
-            transform: rotate(360deg);
-          }
-        }
-      `}</style>
     </div>
   );
 }

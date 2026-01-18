@@ -1,23 +1,31 @@
-import { SupabaseClient, createClient as createSupabaseClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
+// src/lib/supabase-server.ts
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { type ReadonlyRequestCookies } from 'next/dist/server/web/spec-extension/adapters/request-cookies';
 
-// Use a different name for the imported createClient to avoid conflict
-// Then define your own createClient
-export const createClient = (): SupabaseClient => {
-  const cookieStore = cookies();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  return createSupabaseClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
-    global: {
-      headers: {
-        Cookie: cookieStore.toString(),
+export function createSupabaseServerClient(cookieStore: ReadonlyRequestCookies) {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch {
+            // Ignore cookie setting in environments where it's not supported (e.g., middleware)
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch {
+            // Ignore
+          }
+        },
       },
-    },
-  });
-};
+    }
+  );
+}

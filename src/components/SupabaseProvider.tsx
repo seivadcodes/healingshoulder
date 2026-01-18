@@ -2,18 +2,13 @@
 'use client';
 
 import { createContext, useContext, useState } from 'react';
-import { createBrowserClient } from '@supabase/ssr';
+import { createClient } from '@/lib/supabase'; // ✅ reuse your validated client
 import type { Database } from '@/types/supabase';
 
-const SupabaseContext = createContext<ReturnType<typeof createBrowserClient<Database>> | null>(null);
+const SupabaseContext = createContext<ReturnType<typeof createClient> | null>(null);
 
 export function SupabaseProvider({ children }: { children: React.ReactNode }) {
-  const [supabase] = useState(() =>
-    createBrowserClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-  );
+  const [supabase] = useState(() => createClient());
 
   return (
     <SupabaseContext.Provider value={supabase}>

@@ -11,7 +11,7 @@ interface PostComposerProps {
   placeholder?: string;
   avatarUrl?: string | null;
   displayName?: string;
-  maxFiles?: number; // default 4
+  maxFiles?: number;
 }
 
 export function PostComposer({
@@ -25,6 +25,7 @@ export function PostComposer({
   const [text, setText] = useState('');
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
+  const [isExpanded, setIsExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -41,6 +42,7 @@ export function PostComposer({
     setMediaFiles(prev => [...prev, ...validFiles]);
     const newPreviews = validFiles.map(file => URL.createObjectURL(file));
     setMediaPreviews(prev => [...prev, ...newPreviews]);
+    setIsExpanded(true);
   };
 
   const removeMedia = (index: number) => {
@@ -52,15 +54,98 @@ export function PostComposer({
   };
 
   const handleSubmit = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() && mediaFiles.length === 0) return;
     await onSubmit(text.trim(), mediaFiles);
-    // Reset after successful submit (parent can also control this if needed)
     setText('');
     setMediaFiles([]);
     setMediaPreviews([]);
+    setIsExpanded(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const hasContent = text.trim().length > 0 || mediaFiles.length > 0;
+
+  // 🟢 COMPACT STATE: with blinking cursor + send icon
+  if (!isExpanded) {
+    return (
+      <div
+        onClick={() => setIsExpanded(true)}
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: '1rem',
+          border: '1px solid #e7e5e4',
+          padding: '0.75rem 1rem',
+          boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
+          cursor: 'text',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+        }}
+      >
+        {/* Avatar */}
+        <div style={{
+          width: '2rem',
+          height: '2rem',
+          borderRadius: '9999px',
+          backgroundColor: avatarUrl ? 'transparent' : '#fef3c7',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          overflow: 'hidden',
+        }}>
+          {avatarUrl ? (
+            <Image
+              src={avatarUrl}
+              alt={displayName}
+              width={32}
+              height={32}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <span style={{ color: '#92400e', fontWeight: 500, fontSize: '0.875rem' }}>
+              {displayName.charAt(0).toUpperCase()}
+            </span>
+          )}
+        </div>
+
+        {/* Placeholder + blinking cursor */}
+        <div style={{
+          color: '#a8a29e',
+          fontSize: '0.875rem',
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          position: 'relative',
+        }}>
+          {placeholder}
+          <span
+            style={{
+              marginLeft: '4px',
+              width: '1px',
+              height: '1em',
+              backgroundColor: '#a8a29e',
+              animation: 'blink 1s step-end infinite',
+              display: 'inline-block',
+              verticalAlign: 'middle',
+            }}
+          />
+        </div>
+
+        {/* Tiny Send icon on the far right */}
+        <Send size={16} color="#a8a29e" style={{ flexShrink: 0 }} />
+
+        <style jsx>{`
+          @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  // 🔵 EXPANDED STATE
   return (
     <div style={{
       backgroundColor: '#fff',
@@ -104,6 +189,7 @@ export function PostComposer({
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={placeholder}
+            autoFocus
             style={{
               width: '100%',
               padding: '0.5rem',
@@ -208,48 +294,79 @@ export function PostComposer({
               style={{ display: 'none' }}
             />
 
-            <button
-              onClick={handleSubmit}
-              disabled={!text.trim() || isSubmitting}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                borderRadius: '0.75rem',
-                fontWeight: 500,
-                fontSize: '0.875rem',
-                backgroundColor: text.trim() && !isSubmitting ? '#f59e0b' : '#d6d3d1',
-                color: text.trim() && !isSubmitting ? '#fff' : '#a8a29e',
-                cursor: !text.trim() || isSubmitting ? 'not-allowed' : 'pointer',
-                boxShadow: text.trim() && !isSubmitting ? '0 4px 6px -1px rgba(0,0,0,0.1)' : 'none',
-              }}
-            >
-              {isSubmitting ? (
-                <>
-                  <div style={{
-                    width: '1rem',
-                    height: '1rem',
-                    borderRadius: '50%',
-                    border: '2px solid white',
-                    borderTopColor: 'transparent',
-                    animation: 'spin 1s linear infinite',
-                  }}></div>
-                  Sharing...
-                </>
-              ) : (
-                <>
-                  Share
-                  <Send size={16} />
-                </>
-              )}
-            </button>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsExpanded(false);
+                  setText('');
+                  setMediaFiles([]);
+                  setMediaPreviews([]);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                style={{
+                  flex: 1,
+                  padding: '0.625rem',
+                  borderRadius: '0.75rem',
+                  fontWeight: 500,
+                  fontSize: '0.875rem',
+                  backgroundColor: '#f5f5f4',
+                  color: '#404040',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={handleSubmit}
+                disabled={!hasContent || isSubmitting}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  padding: '0.625rem',
+                  borderRadius: '0.75rem',
+                  fontWeight: 500,
+                  fontSize: '0.875rem',
+                  backgroundColor: hasContent && !isSubmitting ? '#f59e0b' : '#d6d3d1',
+                  color: hasContent && !isSubmitting ? '#fff' : '#a8a29e',
+                  cursor: !hasContent || isSubmitting ? 'not-allowed' : 'pointer',
+                  boxShadow: hasContent && !isSubmitting ? '0 4px 6px -1px rgba(0,0,0,0.1)' : 'none',
+                }}
+              >
+                {isSubmitting ? (
+                  <>
+                    <div style={{
+                      width: '1rem',
+                      height: '1rem',
+                      borderRadius: '50%',
+                      border: '2px solid white',
+                      borderTopColor: 'transparent',
+                      animation: 'spin 1s linear infinite',
+                    }}></div>
+                    Sharing...
+                  </>
+                ) : (
+                  <>
+                    Share
+                    <Send size={16} />
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       <style jsx>{`
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
