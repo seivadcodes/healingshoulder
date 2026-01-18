@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Image from 'next/image';
-
+import { useSearchParams } from 'next/navigation';
 // --- Types ---
 interface Community {
   id: string;
@@ -195,6 +195,8 @@ export default function CommunityDetailPage() {
   const params = useParams();
   const communityId = params.communityId as string;
   const router = useRouter();
+  const searchParams = useSearchParams();
+const targetPostId = searchParams.get('postId');
   const supabase = createClient();
   const { user } = useAuth();
 
@@ -215,6 +217,7 @@ export default function CommunityDetailPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isModalSubmitting, setIsModalSubmitting] = useState(false);
   const composerRef = useRef<HTMLDivElement>(null);
+  const postRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<string>('');
   const [isMobile, setIsMobile] = useState(false);
@@ -454,6 +457,30 @@ export default function CommunityDetailPage() {
 
     fetchData();
   }, [communityId, user, supabase, isUserOnline]);
+
+  useEffect(() => {
+  if (targetPostId && posts.some((p) => p.id === targetPostId)) {
+    const timer = setTimeout(() => {
+      const element = postRefs.current[targetPostId];
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        // Highlight
+        element.style.transition = 'background-color 0.8s ease';
+        element.style.backgroundColor = '#fff9db';
+        setTimeout(() => {
+          element.style.backgroundColor = '';
+        }, 1000);
+
+        // Clean URL
+        const url = new URL(window.location.href);
+        url.searchParams.delete('postId');
+        router.replace(`${url.pathname}${url.search}`, { scroll: false });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }
+}, [targetPostId, posts, router]);
 
   // Refresh members & online count every 30s
   useEffect(() => {
@@ -1193,40 +1220,54 @@ export default function CommunityDetailPage() {
           )}
 
           {/* Posts */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
-            {posts.length === 0 ? (
-              <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center' }}>
-                <MessageCircle size={48} style={{ color: baseColors.border, margin: '0 auto 1rem' }} />
-                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: baseColors.text.primary, marginBottom: spacing.sm }}>
-                  No posts yet
-                </h3>
-                <p style={{ color: baseColors.text.secondary, marginBottom: spacing.lg }}>
-                  {isMember
-                    ? "Be the first to share your thoughts with the community."
-                    : "Join this community to see and share posts."}
-                </p>
-                {!isMember && user && (
-                  <button onClick={handleMembership} style={buttonStyle(baseColors.primary)}>
-                    <UserPlus size={16} style={{ marginRight: '0.25rem' }} />
-                    Join to Participate
-                  </button>
-                )}
-              </div>
-            ) : (
-              posts.map((post) => (
-                <PostCard
-                  key={post.id}
-                  post={transformPostForCard(post)}
-                  canDelete={isModerator || post.user_id === user?.id}
-                  onPostDeleted={() => {
-                    setPosts((prev) => prev.filter((p) => p.id !== post.id));
-                  }}
-                  context="community"
-                  showAuthor={true}
-                />
-              ))
-            )}
-          </div>
+<div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
+  {posts.length === 0 ? (
+    <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center' }}>
+      <MessageCircle size={48} style={{ color: baseColors.border, margin: '0 auto 1rem' }} />
+      <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: baseColors.text.primary, marginBottom: spacing.sm }}>
+        No posts yet
+      </h3>
+      <p style={{ color: baseColors.text.secondary, marginBottom: spacing.lg }}>
+        {isMember
+          ? "Be the first to share your thoughts with the community."
+          : "Join this community to see and share posts."}
+      </p>
+      {!isMember && user && (
+        <button onClick={handleMembership} style={buttonStyle(baseColors.primary)}>
+          <UserPlus size={16} style={{ marginRight: '0.25rem' }} />
+          Join to Participate
+        </button>
+      )}
+    </div>
+  ) : (
+    posts.map((post) => {
+      // Initialize ref slot for scroll-to-post
+      if (!postRefs.current[post.id]) {
+        postRefs.current[post.id] = null;
+      }
+
+      return (
+        <div
+          key={post.id}
+          ref={(el) => {
+            postRefs.current[post.id] = el;
+          }}
+        >
+          <PostCard
+            key={post.id}
+            post={transformPostForCard(post)}
+            canDelete={isModerator || post.user_id === user?.id}
+            onPostDeleted={() => {
+              setPosts((prev) => prev.filter((p) => p.id !== post.id));
+            }}
+            context="community"
+            showAuthor={true}
+          />
+        </div>
+      );
+    })
+  )}
+</div>s
         </div>
 
         {/* Sidebar */}
