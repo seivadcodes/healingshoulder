@@ -153,7 +153,7 @@ const cardStyle: React.CSSProperties = {
   border: `1px solid ${baseColors.border}`,
   padding: spacing.xl,
   boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-  marginBottom: spacing['2xl'],
+  marginBottom: spacing.xs,
 };
 const pageContainer: React.CSSProperties = {
   minHeight: '100vh',
@@ -196,7 +196,7 @@ export default function CommunityDetailPage() {
   const communityId = params.communityId as string;
   const router = useRouter();
   const searchParams = useSearchParams();
-const targetPostId = searchParams.get('postId');
+  const targetPostId = searchParams.get('postId');
   const supabase = createClient();
   const { user } = useAuth();
 
@@ -226,7 +226,7 @@ const targetPostId = searchParams.get('postId');
   const [isKebabOpen, setIsKebabOpen] = useState(false);
   const kebabMenuRef = useRef<HTMLDivElement>(null);
   const [memberStatusResolved, setMemberStatusResolved] = useState(false); // 👈 NEW
-
+  const [showFullDescription, setShowFullDescription] = useState(false);
   // Inject global styles once
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -319,7 +319,11 @@ const targetPostId = searchParams.get('postId');
 
         let coverPhotoUrl = communityData.cover_photo_url;
         if (!coverPhotoUrl) {
-          coverPhotoUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/communities/${communityId}/banner.jpg?t=${Date.now()}`;
+          // Only add timestamp after an actual upload
+          const baseBannerUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/communities/${communityId}/banner.jpg`;
+
+          // On initial load, use base URL without timestamp
+          coverPhotoUrl = baseBannerUrl;
         }
 
         // 2. Count total members
@@ -459,28 +463,28 @@ const targetPostId = searchParams.get('postId');
   }, [communityId, user, supabase, isUserOnline]);
 
   useEffect(() => {
-  if (targetPostId && posts.some((p) => p.id === targetPostId)) {
-    const timer = setTimeout(() => {
-      const element = postRefs.current[targetPostId];
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (targetPostId && posts.some((p) => p.id === targetPostId)) {
+      const timer = setTimeout(() => {
+        const element = postRefs.current[targetPostId];
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-        // Highlight
-        element.style.transition = 'background-color 0.8s ease';
-        element.style.backgroundColor = '#fff9db';
-        setTimeout(() => {
-          element.style.backgroundColor = '';
-        }, 1000);
+          // Highlight
+          element.style.transition = 'background-color 0.8s ease';
+          element.style.backgroundColor = '#fff9db';
+          setTimeout(() => {
+            element.style.backgroundColor = '';
+          }, 1000);
 
-        // Clean URL
-        const url = new URL(window.location.href);
-        url.searchParams.delete('postId');
-        router.replace(`${url.pathname}${url.search}`, { scroll: false });
-      }
-    }, 150);
-    return () => clearTimeout(timer);
-  }
-}, [targetPostId, posts, router]);
+          // Clean URL
+          const url = new URL(window.location.href);
+          url.searchParams.delete('postId');
+          router.replace(`${url.pathname}${url.search}`, { scroll: false });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [targetPostId, posts, router]);
 
   // Refresh members & online count every 30s
   useEffect(() => {
@@ -1032,177 +1036,263 @@ const targetPostId = searchParams.get('postId');
         }}
       >
         {/* Main Feed */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
-          {/* Community Header */}
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg, position: 'relative' }}>
-              {/* Three-dot menu (visible only to members) */}
-              {user && isMember && (
-                <div
-                  ref={kebabMenuRef}
-                  style={{ position: 'absolute', top: spacing.sm, right: spacing.sm, zIndex: 1 }}
-                >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+         {/* Community Header */}
+<div style={cardStyle}>
+  <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg, position: 'relative' }}>
+    {/* Three-dot menu (visible only to members) — FIXED VISUALLY */}
+    {user && isMember && (
+      <div
+        ref={kebabMenuRef}
+        style={{ position: 'absolute', top: spacing.sm, right: spacing.sm, zIndex: 1 }}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsKebabOpen((prev) => !prev);
+          }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: spacing.xs,
+            borderRadius: borderRadius.sm,
+            color: baseColors.text.muted,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '24px',
+            height: '24px',
+            fontSize: '1.25rem',
+            lineHeight: 1,
+          }}
+          aria-label="Community options"
+        >
+          ⋮
+        </button>
+        {isKebabOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              right: 0,
+              marginTop: spacing.xs,
+              backgroundColor: baseColors.surface,
+              border: `1px solid ${baseColors.border}`,
+              borderRadius: borderRadius.md,
+              boxShadow:
+                '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)',
+              minWidth: '120px',
+              zIndex: 10,
+            }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMembership();
+                setIsKebabOpen(false);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                padding: `${spacing.sm} ${spacing.md}`,
+                background: 'none',
+                border: 'none',
+                color: '#ef4444',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing.sm,
+              }}
+            >
+              <LogOut size={16} />
+              Leave Community
+            </button>
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* Top Container: Banner Image + Title */}
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing.lg }}>
+      {/* Banner Thumbnail or Fallback Icon — CLICKABLE */}
+      <Link href={mediaGalleryRoute} passHref>
+        <div
+          style={{
+            width: '4rem',
+            height: '4rem',
+            borderRadius: borderRadius.md,
+            overflow: 'hidden',
+            flexShrink: 0,
+            position: 'relative',
+            cursor: 'pointer',
+          }}
+        >
+          {community.cover_photo_url ? (
+            <Image
+              src={community.cover_photo_url}
+              alt={`${community.name} banner`}
+              fill
+              style={{ objectFit: 'cover' }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(community.name)}`;
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                background: gradient,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+              }}
+            >
+              <Users size={32} />
+            </div>
+          )}
+        </div>
+      </Link>
+
+      {/* Community Title & Description */}
+      <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: baseColors.text.primary, margin: 0 }}>
+          {community.name}
+        </h1>
+        <div style={{ color: baseColors.text.secondary, marginTop: spacing.sm, lineHeight: 1.6 }}>
+          {(() => {
+            const paragraphs = community.description
+              ?.split('\n')
+              .filter(p => p.trim() !== '') || [];
+            const flatText = paragraphs.join(' ').trim();
+
+            if (showFullDescription) {
+              return (
+                <>
+                  {paragraphs.map((p, i) => (
+                    <p key={i} style={{ margin: '0 0 0.75em 0' }}>{p}</p>
+                  ))}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setIsKebabOpen((prev) => !prev);
+                      setShowFullDescription(false);
                     }}
                     style={{
-                      background: 'transparent',
+                      background: 'none',
                       border: 'none',
+                      color: baseColors.primary,
                       cursor: 'pointer',
-                      padding: spacing.xs,
-                      borderRadius: borderRadius.sm,
-                      color: baseColors.text.muted,
-                    }}
-                    aria-label="Community options"
-                  >
-                    <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>⋯</span>
-                  </button>
-                  {isKebabOpen && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '100%',
-                        right: 0,
-                        marginTop: spacing.xs,
-                        backgroundColor: baseColors.surface,
-                        border: `1px solid ${baseColors.border}`,
-                        borderRadius: borderRadius.md,
-                        boxShadow:
-                          '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)',
-                        minWidth: '120px',
-                        zIndex: 10,
-                      }}
-                    >
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMembership();
-                          setIsKebabOpen(false);
-                        }}
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: `${spacing.sm} ${spacing.md}`,
-                          background: 'none',
-                          border: 'none',
-                          color: '#ef4444',
-                          cursor: 'pointer',
-                          fontSize: '0.875rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: spacing.sm,
-                        }}
-                      >
-                        <LogOut size={16} />
-                        Leave Community
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing.lg }}>
-                {/* Banner Thumbnail or Fallback Icon — NOW CLICKABLE */}
-                <Link href={mediaGalleryRoute} passHref>
-                  <div
-                    style={{
-                      width: '4rem',
-                      height: '4rem',
-                      borderRadius: borderRadius.md,
-                      overflow: 'hidden',
-                      flexShrink: 0,
-                      position: 'relative',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {community.cover_photo_url ? (
-                      <Image
-                        src={community.cover_photo_url}
-                        alt={`${community.name} banner`}
-                        fill
-                        style={{ objectFit: 'cover' }}
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://via.placeholder.com/1200x300/fcd34d-f97316?text=${encodeURIComponent(community.name)}`;
-                        }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          background: gradient,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: 'white',
-                        }}
-                      >
-                        <Users size={32} />
-                      </div>
-                    )}
-                  </div>
-                </Link>
-
-                {/* Community Info */}
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: baseColors.text.primary }}>{community.name}</h1>
-                  <p style={{ color: baseColors.text.secondary, marginTop: spacing.sm }}>{community.description}</p>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: spacing.md,
-                      marginTop: spacing.md,
                       fontSize: '0.875rem',
-                      color: baseColors.text.muted,
+                      padding: 0,
+                      marginTop: '-0.5rem',
                     }}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <Users size={16} style={{ color: baseColors.primary }} /> {community.member_count} members
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <Heart size={16} style={{ color: baseColors.accent }} /> {community.online_count} online
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <MessageCircle size={16} style={{ color: '#3b82f6' }} /> {posts.length} posts
-                    </span>
-                  </div>
-                </div>
-              </div>
+                    See less
+                  </button>
+                </>
+              );
+            }
 
-              {/* Primary Action Button — Join only */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
-                {!isMember ? (
-                  user ? (
-                    <button onClick={handleMembership} style={buttonStyle(baseColors.primary)}>
-                      <LogIn size={18} /> Join Community
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => router.push(`/auth?redirectTo=/communities/${communityId}`)}
-                      style={buttonStyle(baseColors.primary)}
-                    >
-                      <LogIn size={18} /> Sign in to Join
-                    </button>
-                  )
-                ) : null}
-                {isAdmin && (
+            const maxChars = isMobile ? 80 : 140;
+            const shouldTruncate = flatText.length > maxChars;
+            const preview = shouldTruncate ? flatText.substring(0, maxChars) + '…' : flatText;
+
+            return (
+              <>
+                <p style={{ margin: '0 0 0.75em 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isMobile ? 'nowrap' : 'normal' }}>
+                  {preview}
+                </p>
+                {shouldTruncate && (
                   <button
-                    onClick={() => toast('Community settings coming soon!')}
-                    style={outlineButtonStyle}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowFullDescription(true);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: baseColors.primary,
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      padding: 0,
+                      marginTop: '-0.5rem',
+                    }}
                   >
-                    <Settings size={18} /> Manage
+                    Read more
                   </button>
                 )}
-              </div>
-            </div>
-          </div>
+              </>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+
+    {/* Bottom Container: Stats & Action Buttons */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+      {/* Stats Row */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: spacing.md,
+          fontSize: '0.875rem',
+          color: baseColors.text.muted,
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <Users size={16} style={{ color: baseColors.primary }} /> {community.member_count} members
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <Heart size={16} style={{ color: baseColors.accent }} /> {community.online_count} online
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <MessageCircle size={16} style={{ color: '#3b82f6' }} /> {posts.length} posts
+        </span>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+        {!isMember ? (
+          user ? (
+            <button onClick={handleMembership} style={buttonStyle(baseColors.primary)}>
+              <LogIn size={18} /> Join Community
+            </button>
+          ) : (
+            <button
+              onClick={() => router.push(`/auth?redirectTo=/communities/${communityId}`)}
+              style={buttonStyle(baseColors.primary)}
+            >
+              <LogIn size={18} /> Sign in to Join
+            </button>
+          )
+        ) : null}
+        {isAdmin && (
+          <Link
+            href={`/communities/${communityId}/manage`}
+            style={{
+              ...outlineButtonStyle,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: spacing.sm,
+              textDecoration: 'none',
+              width: 'fit-content',
+            }}
+          >
+            <Settings size={18} /> Manage
+          </Link>
+        )}
+      </div>
+    </div>
+  </div>
+</div>
 
           {/* Create Post */}
           {isMember && (
-            <div ref={composerRef}>
+            <div ref={composerRef} style={{ marginBottom: spacing.lg /* optional extra control */ }}>
               <PostComposer
                 onSubmit={async (text: string, mediaFiles: File[]) => {
                   if (!user) return;
@@ -1220,54 +1310,54 @@ const targetPostId = searchParams.get('postId');
           )}
 
           {/* Posts */}
-<div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
-  {posts.length === 0 ? (
-    <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center' }}>
-      <MessageCircle size={48} style={{ color: baseColors.border, margin: '0 auto 1rem' }} />
-      <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: baseColors.text.primary, marginBottom: spacing.sm }}>
-        No posts yet
-      </h3>
-      <p style={{ color: baseColors.text.secondary, marginBottom: spacing.lg }}>
-        {isMember
-          ? "Be the first to share your thoughts with the community."
-          : "Join this community to see and share posts."}
-      </p>
-      {!isMember && user && (
-        <button onClick={handleMembership} style={buttonStyle(baseColors.primary)}>
-          <UserPlus size={16} style={{ marginRight: '0.25rem' }} />
-          Join to Participate
-        </button>
-      )}
-    </div>
-  ) : (
-    posts.map((post) => {
-      // Initialize ref slot for scroll-to-post
-      if (!postRefs.current[post.id]) {
-        postRefs.current[post.id] = null;
-      }
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing['2xl'] }}>
+            {posts.length === 0 ? (
+              <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center' }}>
+                <MessageCircle size={48} style={{ color: baseColors.border, margin: '0 auto 1rem' }} />
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: baseColors.text.primary, marginBottom: spacing.sm }}>
+                  No posts yet
+                </h3>
+                <p style={{ color: baseColors.text.secondary, marginBottom: spacing.lg }}>
+                  {isMember
+                    ? "Be the first to share your thoughts with the community."
+                    : "Join this community to see and share posts."}
+                </p>
+                {!isMember && user && (
+                  <button onClick={handleMembership} style={buttonStyle(baseColors.primary)}>
+                    <UserPlus size={16} style={{ marginRight: '0.25rem' }} />
+                    Join to Participate
+                  </button>
+                )}
+              </div>
+            ) : (
+              posts.map((post) => {
+                // Initialize ref slot for scroll-to-post
+                if (!postRefs.current[post.id]) {
+                  postRefs.current[post.id] = null;
+                }
 
-      return (
-        <div
-          key={post.id}
-          ref={(el) => {
-            postRefs.current[post.id] = el;
-          }}
-        >
-          <PostCard
-            key={post.id}
-            post={transformPostForCard(post)}
-            canDelete={isModerator || post.user_id === user?.id}
-            onPostDeleted={() => {
-              setPosts((prev) => prev.filter((p) => p.id !== post.id));
-            }}
-            context="community"
-            showAuthor={true}
-          />
-        </div>
-      );
-    })
-  )}
-</div>s
+                return (
+                  <div
+                    key={post.id}
+                    ref={(el) => {
+                      postRefs.current[post.id] = el;
+                    }}
+                  >
+                    <PostCard
+                      key={post.id}
+                      post={transformPostForCard(post)}
+                      canDelete={isModerator || post.user_id === user?.id}
+                      onPostDeleted={() => {
+                        setPosts((prev) => prev.filter((p) => p.id !== post.id));
+                      }}
+                      context="community"
+                      showAuthor={true}
+                    />
+                  </div>
+                );
+              })
+            )}
+          </div>s
         </div>
 
         {/* Sidebar */}
