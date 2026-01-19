@@ -1,13 +1,26 @@
 ﻿// src/components/layout/Header.tsx
 'use client';
+
 import Link from 'next/link';
-import { Home, User, LogOut, Phone, X, MessageSquare, Bell } from 'lucide-react';
+import {
+  Home,
+  User,
+  LogOut,
+  Phone,
+  X,
+  MessageSquare,
+  Bell,
+  Menu,
+  Users,
+  BookOpen,
+  Calendar,
+} from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { useRouter } from 'next/navigation';
-import NotificationModal from '@/components/notifications/NotificationModal'; // ✅ IMPORT MODAL
+import { useRouter, usePathname } from 'next/navigation';
+import NotificationModal from '@/components/notifications/NotificationModal';
 
 type CallInvitation = {
   caller_id: string;
@@ -15,11 +28,11 @@ type CallInvitation = {
   room_id: string;
 };
 
-
-
 export default function Header() {
   const { user, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [profile, setProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -28,12 +41,18 @@ export default function Header() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [isUnreadLoading, setIsUnreadLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
- 
-  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false); // ✅ MODAL STATE
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false);
+
   const wsRef = useRef<WebSocket | null>(null);
-  
   const menuRef = useRef<HTMLDivElement>(null);
+  const hamburgerMenuRef = useRef<HTMLDivElement>(null);
   const supabase = useMemo(() => createClient(), []);
+
+  // Determine if footer is hidden → show hamburger
+  const shouldShowHamburger = useMemo(() => {
+    return pathname?.includes('/chat') || pathname?.startsWith('/messages');
+  }, [pathname]);
 
   // Fetch profile
   useEffect(() => {
@@ -60,67 +79,64 @@ export default function Header() {
   }, [user, supabase]);
 
   const fetchAllUnreadCounts = useCallback(async () => {
-  if (!user?.id) {
-    setUnreadMessages(0);
-    setUnreadNotifications(0);
-    setIsUnreadLoading(false);
-
-
-    return;
-  }
-
-  setIsUnreadLoading(true);
-  try {
-    // Fetch unread messages
-    const { data: convData, error: convError } = await supabase.rpc('get_user_conversations_with_unread', {
-      p_user_id: user.id,
-    });
-    if (!convError && Array.isArray(convData)) {
-      const totalUnread = convData.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
-      setUnreadMessages(totalUnread);
-    } else {
+    if (!user?.id) {
       setUnreadMessages(0);
+      setUnreadNotifications(0);
+      setIsUnreadLoading(false);
+      return;
     }
 
-    // Fetch unread notifications
-    const { count, error: notifError } = await supabase
-  .from('notifications')
-  .select('*', { count: 'exact', head: true })
-  .eq('user_id', user.id)
-  .eq('read', false)
- .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
-    if (!notifError) {
-      setUnreadNotifications(count || 0);
-    } else {
+    setIsUnreadLoading(true);
+    try {
+      const { data: convData, error: convError } = await supabase.rpc('get_user_conversations_with_unread', {
+        p_user_id: user.id,
+      });
+      if (!convError && Array.isArray(convData)) {
+        const totalUnread = convData.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
+        setUnreadMessages(totalUnread);
+      } else {
+        setUnreadMessages(0);
+      }
+
+      const { count, error: notifError } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false)
+        .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
+
+      if (!notifError) {
+        setUnreadNotifications(count || 0);
+      } else {
+        setUnreadNotifications(0);
+      }
+    } catch (err) {
+      console.error('Error fetching all unread counts:', err);
+      setUnreadMessages(0);
       setUnreadNotifications(0);
+    } finally {
+      setIsUnreadLoading(false);
     }
-  } catch (err) {
-    console.error('Error fetching all unread counts:', err);
-    setUnreadMessages(0);
-    setUnreadNotifications(0);
-  } finally {
-    setIsUnreadLoading(false);
-  }
-}, [user?.id, supabase]);
+  }, [user?.id, supabase]);
 
   // Unified initial fetch + refetch on focus/visibility
-useEffect(() => {
-  fetchAllUnreadCounts();
-  
-  const handleVisibilityChange = () => {
-    if (document.visibilityState === 'visible') {
-      fetchAllUnreadCounts();
-    }
-  };
+  useEffect(() => {
+    fetchAllUnreadCounts();
 
-  window.addEventListener('focus', fetchAllUnreadCounts);
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAllUnreadCounts();
+      }
+    };
 
-  return () => {
-    window.removeEventListener('focus', fetchAllUnreadCounts);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-  };
-}, [fetchAllUnreadCounts]);
+    window.addEventListener('focus', fetchAllUnreadCounts);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', fetchAllUnreadCounts);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchAllUnreadCounts]);
 
   // WebSocket setup
   useEffect(() => {
@@ -132,16 +148,15 @@ useEffect(() => {
 
     socket.onopen = () => {
       console.log('HeaderCode WebSocket connected');
-      
       fetchAllUnreadCounts();
     };
 
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data.toString());
-       if (data.type === 'new_message') {
-  fetchAllUnreadCounts();
-}
+        if (data.type === 'new_message') {
+          fetchAllUnreadCounts();
+        }
         if (data.type === 'call_invitation') {
           setIncomingCall({
             caller_id: data.caller_id,
@@ -158,17 +173,16 @@ useEffect(() => {
       }
     };
 
-    socket.onclose = () => 
+    socket.onclose = () => {};
     socket.onerror = (err) => {
       console.error('HeaderCode WebSocket error:', err);
-     
     };
 
     wsRef.current = socket;
     return () => socket.close();
   }, [user?.id, fetchAllUnreadCounts]);
 
-  // Close menu on outside click
+  // Close profile menu on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -179,30 +193,46 @@ useEffect(() => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-// Listen for global unread refresh requests
-useEffect(() => {
-  const handleUnreadRefresh = () => {
-    if (user?.id) {
-      fetchAllUnreadCounts();
+  // Close hamburger menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        hamburgerMenuRef.current &&
+        !hamburgerMenuRef.current.contains(event.target as Node) &&
+        !(event.target as Element).closest('button[aria-label="Open navigation menu"]')
+      ) {
+        setIsHamburgerMenuOpen(false);
+      }
+    };
+    if (isHamburgerMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
     }
-  };
-  const handleUnreadUpdate = (event: Event) => {
-    const customEvent = event as CustomEvent;
-    const newCount = customEvent.detail;
-    if (typeof newCount === 'number') {
-      setUnreadMessages(newCount);
-    }
-  };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isHamburgerMenuOpen]);
 
-  window.addEventListener('unreadUpdateRequest', handleUnreadRefresh);
-  window.addEventListener('unreadUpdate', handleUnreadUpdate);
+  // Listen for global unread refresh requests
+  useEffect(() => {
+    const handleUnreadRefresh = () => {
+      if (user?.id) {
+        fetchAllUnreadCounts();
+      }
+    };
+    const handleUnreadUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const newCount = customEvent.detail;
+      if (typeof newCount === 'number') {
+        setUnreadMessages(newCount);
+      }
+    };
 
-  return () => {
-    window.removeEventListener('unreadUpdateRequest', handleUnreadRefresh);
-    window.removeEventListener('unreadUpdate', handleUnreadUpdate);
-  };
-}, [user?.id, fetchAllUnreadCounts]);
+    window.addEventListener('unreadUpdateRequest', handleUnreadRefresh);
+    window.addEventListener('unreadUpdate', handleUnreadUpdate);
 
+    return () => {
+      window.removeEventListener('unreadUpdateRequest', handleUnreadRefresh);
+      window.removeEventListener('unreadUpdate', handleUnreadUpdate);
+    };
+  }, [user?.id, fetchAllUnreadCounts]);
 
   const initials = useMemo(() => {
     if (!user) return 'U';
@@ -218,6 +248,7 @@ useEffect(() => {
     if (wsRef.current) wsRef.current.close(1000, 'User logged out');
     await signOut();
     setIsMenuOpen(false);
+    setIsHamburgerMenuOpen(false);
   };
 
   const handleAcceptCall = async () => {
@@ -246,6 +277,15 @@ useEffect(() => {
     setShowCallBanner(false);
   };
 
+  // ✅ Define nav items with proper Lucide icons (no custom SVGs needed)
+  const navItems = [
+    { name: 'Dashboard', href: '/dashboard', icon: Home },
+    { name: 'Connect', href: '/connect', icon: Users },
+    { name: 'Communities', href: '/communities', icon: Users },
+    { name: 'Resources', href: '/resources', icon: BookOpen },
+    { name: 'Schedule', href: '/schedule', icon: Calendar },
+  ];
+
   if (authLoading) return null;
 
   return (
@@ -273,24 +313,48 @@ useEffect(() => {
             justifyContent: 'space-between',
           }}
         >
-          <Link
-            href="/"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              color: 'white',
-              textDecoration: 'none',
-              transition: 'color 0.2s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = '#bfdbfe')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'white')}
-            aria-label="Back to Home"
-          >
-            <Home size={20} color="white" />
-            <span style={{ fontWeight: 500 }}>Healing Shoulder</span>
-          </Link>
+          {/* Left side: Hamburger or Home link */}
+          {shouldShowHamburger ? (
+            <button
+              onClick={() => setIsHamburgerMenuOpen(true)}
+              aria-label="Open navigation menu"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'white',
+                cursor: 'pointer',
+                padding: '0.25rem',
+                borderRadius: '0.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <Menu size={24} color="white" />
+            </button>
+          ) : (
+            <Link
+              href="/"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                color: 'white',
+                textDecoration: 'none',
+                transition: 'color 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#bfdbfe')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'white')}
+              aria-label="Back to Home"
+            >
+              <Home size={20} color="white" />
+              <span style={{ fontWeight: 500 }}>Surviving Death Loss</span>
+            </Link>
+          )}
 
+          {/* Right side: Authed or guest actions */}
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               {/* Messages */}
@@ -336,12 +400,9 @@ useEffect(() => {
                 )}
               </Link>
 
-              {/* 🔔 Notification Bell — OPENS MODAL */}
+              {/* Notifications */}
               <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  setIsNotificationModalOpen(true); // ✅ OPEN MODAL
-                }}
+                onClick={() => setIsNotificationModalOpen(true)}
                 style={{
                   position: 'relative',
                   background: 'none',
@@ -385,7 +446,7 @@ useEffect(() => {
                 )}
               </button>
 
-              {/* User Menu */}
+              {/* User Avatar Menu */}
               <div ref={menuRef} style={{ position: 'relative' }}>
                 <button
                   onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -486,7 +547,7 @@ useEffect(() => {
                     <button
                       onClick={() => {
                         setIsMenuOpen(false);
-                        setIsNotificationModalOpen(true); // ✅ Also open modal from menu
+                        setIsNotificationModalOpen(true);
                       }}
                       style={{
                         width: '100%',
@@ -554,7 +615,7 @@ useEffect(() => {
         </div>
       </header>
 
-      {/* 🔔 Incoming Call Banner */}
+      {/* Incoming Call Banner */}
       {user && showCallBanner && incomingCall && (
         <div
           style={{
@@ -630,7 +691,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Mobile menu overlay */}
+      {/* Profile menu overlay */}
       {isMenuOpen && (
         <div
           style={{
@@ -646,7 +707,67 @@ useEffect(() => {
         ></div>
       )}
 
-      {/* 🔔 NOTIFICATION MODAL — RENDERED AT ROOT LEVEL */}
+      {/* Hamburger Navigation Menu */}
+      {shouldShowHamburger && isHamburgerMenuOpen && (
+        <>
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 41,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            }}
+            onClick={() => setIsHamburgerMenuOpen(false)}
+          ></div>
+          <div
+            ref={hamburgerMenuRef}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: '200px',
+              backgroundColor: '#1e3a8a',
+              zIndex: 42,
+              padding: '4rem 0 1rem',
+              boxShadow: '2px 0 10px rgba(0,0,0,0.2)',
+            }}
+          >
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0 1rem' }}>
+              {navItems.map((item) => {
+                const IconComponent = item.icon;
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      padding: '0.75rem 1rem',
+                      color: 'white',
+                      textDecoration: 'none',
+                      borderRadius: '0.375rem',
+                      transition: 'background-color 0.2s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <IconComponent size={20} />
+                    <span>{item.name}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        </>
+      )}
+
+      {/* Notification Modal */}
       {isNotificationModalOpen && (
         <NotificationModal
           isOpen={true}

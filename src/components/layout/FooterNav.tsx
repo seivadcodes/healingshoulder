@@ -21,7 +21,14 @@ const baseNavItems = [
 export default function FooterNav() {
   const pathname = usePathname();
 
-  // Dark blue background for footer
+  // 👇 HIDE FOOTER ON CHAT PAGES AND MESSAGE-LIKE ROUTES
+  if (
+    pathname?.includes('/chat') ||
+    pathname?.startsWith('/messages') // if you have a /messages route
+  ) {
+    return null;
+  }
+
   const darkBlue = '#1e3a8a'; // Tailwind blue-800
 
   const footerStyle: React.CSSProperties = {
@@ -35,23 +42,12 @@ export default function FooterNav() {
     backdropFilter: 'blur(8px)',
   };
 
-  const footerStyleMd: React.CSSProperties = {
-    position: 'static',
-    borderTop: 'none',
-    backgroundColor: 'transparent',
-    backdropFilter: 'none',
-  };
-
   const navContainerStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-around',
     height: '3.5rem',
     padding: '0 0.5rem',
-  };
-
-  const navContainerStyleMd: React.CSSProperties = {
-    padding: '0 1rem',
   };
 
   const linkBaseStyle: React.CSSProperties = {
@@ -66,7 +62,6 @@ export default function FooterNav() {
     color: 'white',
   };
 
-  // Determine dashboard/home item dynamically
   const isOnDashboard = pathname === '/dashboard';
   const dashboardItem = {
     name: isOnDashboard ? 'Home' : 'Dashboard',
@@ -74,14 +69,11 @@ export default function FooterNav() {
     icon: Home,
   };
 
-  // Insert dashboard as first item
   const navItems = [dashboardItem, ...baseNavItems];
 
-  const isMd = false; // You may later replace this with a real media query hook if needed
-
   return (
-    <footer style={isMd ? { ...footerStyle, ...footerStyleMd } : footerStyle}>
-      <div style={isMd ? { ...navContainerStyle, ...navContainerStyleMd } : navContainerStyle}>
+    <footer style={footerStyle}>
+      <div style={navContainerStyle}>
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -96,13 +88,13 @@ export default function FooterNav() {
               onMouseEnter={(e) => {
                 if (!isActive) {
                   const icon = e.currentTarget.querySelector('svg');
-                  if (icon) icon.style.color = '#1f2937'; // dark gray on hover
+                  if (icon) icon.style.color = '#1f2937';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isActive) {
                   const icon = e.currentTarget.querySelector('svg');
-                  if (icon) icon.style.color = '#000000'; // back to black
+                  if (icon) icon.style.color = '#000000';
                 }
               }}
               aria-label={item.name}

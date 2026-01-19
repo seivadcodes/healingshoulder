@@ -1483,7 +1483,7 @@ avatar_url
     backgroundColor: '#f9fafb',
     display: 'flex',
     flexDirection: 'column',
-    paddingBottom: '3.5rem', // 👈 ADD THIS LINE
+    paddingBottom: '0.5rem', // 👈 ADD THIS LINE
   }}>
         {/* Mobile Chat Header */}
         <div style={{
