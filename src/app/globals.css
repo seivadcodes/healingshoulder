@@ -43,7 +43,13 @@ body {
   object-fit: contain; /* or 'cover' if you prefer fill without black bars */
   border-radius: 0; /* override any default if needed */
 }
-
+.no-touch-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 
 /* Force LiveKit video tiles to fill their container */
 .lk-participant-tile video {
