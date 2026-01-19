@@ -200,9 +200,9 @@ export default function CommunityChatPage() {
 
   useEffect(() => {
     if (!user || !communityId) return;
-    const socket = new WebSocket(
-      `wss://livekit.survivingdeathloss.site/notify?userId=${user.id}`
-    );
+   const socket = new WebSocket(
+  `wss://livekit.survivingdeathloss.site/notify?userId=${user.id}&communityId=${communityId}`
+);
     socket.onopen = () => console.log('✅ WS connected for community chat');
     socket.onmessage = async (event) => {
       try {
