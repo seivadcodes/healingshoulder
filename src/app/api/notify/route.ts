@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
     // === 2. Handle COMMUNITY notifications ===
     const { communityId, type } = body;
 
-    // ✨ Optimize: Typing events don’t need full member list — send as-is
+    // ✅ Optimize: Typing events don’t need full member list — send as-is
     if (communityId && type === 'community_user_typing') {
       console.log(`📤 Forwarding typing event in community ${communityId} for user ${body.userId}`);
       const signalingRes = await fetch(`${signalingServerUrl}/notify-community`, {
