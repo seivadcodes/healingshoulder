@@ -520,7 +520,15 @@ const SettingsModal = ({
         {/* Profile Picture Section */}
         <div style={{ ...baseStyles.card, marginBottom: '1.5rem' }}>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <div style={{ padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '0.5rem' }}>
+            <div style={{
+  width: '2.5rem',
+  height: '2.5rem',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#fef3c7',
+  borderRadius: '0.5rem'
+}}>
               <Camera size={20} style={{ color: '#92400e' }} />
             </div>
             <div style={{ flex: 1 }}>
@@ -538,13 +546,13 @@ const SettingsModal = ({
                   {profile?.avatarUrl ? (
   <div style={{ width: '100%', height: '100%', borderRadius: '9999px', overflow: 'hidden' }}>
     <Image
-      src={`/api/media/avatars/${profile.avatarUrl}`}
-      alt="Your avatar"
-      width={40}
-      height={40}
-      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      unoptimized
-    />
+  src={profile.avatarUrl}  // ✅ Already a valid /api/media/... URL
+  alt="Your avatar"
+  width={40}
+  height={40}
+  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+  unoptimized
+/>
   </div>
 ) : (
                     <div style={{
@@ -616,7 +624,15 @@ const SettingsModal = ({
         {/* Display Name Section */}
         <div style={{ ...baseStyles.card, marginBottom: '1.5rem' }}>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <div style={{ padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '0.5rem' }}>
+            <div style={{
+  width: '2.5rem',
+  height: '2.5rem',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#fef3c7',
+  borderRadius: '0.5rem'
+}}>
               <User size={20} style={{ color: '#92400e' }} />
             </div>
             <div style={{ flex: 1 }}>
@@ -1223,52 +1239,49 @@ const NewPostForm = ({
         {mediaPreviews.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '0.5rem', marginTop: '0.75rem' }}>
             {mediaPreviews.map((url, i) => (
-              <div key={i} style={{
-                position: 'relative',
-                width: '5rem',
-                height: '5rem',
-                borderRadius: '0.5rem',
-                overflow: 'hidden',
-                border: '1px solid #e7e5e4',
-              }}>
-                <div style={{ width: '100%', height: '100%', overflow: 'hidden', borderRadius: '0.5rem' }}>
-                  <Image
-                    src={url}
-                    alt={`Attachment ${i + 1}`}
-                    width={80}
-                    height={80}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                    }}
-                    unoptimized
-                  />
-                </div>
-                <button
-                  onClick={() => removeMedia(i)}
-                  style={{
-                    position: 'absolute',
-                    top: '-0.25rem',
-                    right: '-0.25rem',
-                    backgroundColor: '#ef4444',
-                    color: '#fff',
-                    width: '1.25rem',
-                    height: '1.25rem',
-                    borderRadius: '9999px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
-                  aria-label="Remove attachment"
-                >
-                  <X size={10} />
-                </button>
-              </div>
-            ))}
+  <div key={i} style={{
+    position: 'relative',
+    width: '5rem',
+    height: '5rem',
+    borderRadius: '0.5rem',
+    overflow: 'hidden',
+    border: '1px solid #e7e5e4',
+  }}>
+    {/* Use <img> instead of <Image> for blob URLs */}
+    <img
+      src={url}
+      alt={`Attachment ${i + 1}`}
+      style={{
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        borderRadius: '0.5rem',
+      }}
+    />
+    <button
+      onClick={() => removeMedia(i)}
+      style={{
+        position: 'absolute',
+        top: '-0.25rem',
+        right: '-0.25rem',
+        backgroundColor: '#ef4444',
+        color: '#fff',
+        width: '1.25rem',
+        height: '1.25rem',
+        borderRadius: '9999px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        border: 'none',
+        cursor: 'pointer',
+      }}
+      aria-label="Remove attachment"
+    >
+      <X size={10} />
+    </button>
+  </div>
+))}
           </div>
         )}
 

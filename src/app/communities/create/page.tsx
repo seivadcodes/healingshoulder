@@ -114,6 +114,7 @@ export default function CreateCommunityPage() {
   const router = useRouter();
   const supabase = createClient();
   const { user, sessionChecked } = useAuth();
+  const [otherLossDescription, setOtherLossDescription] = useState('');
 
   useEffect(() => {
     if (sessionChecked && !user) {
@@ -204,16 +205,17 @@ export default function CreateCommunityPage() {
       }
 
       const { error: communityError } = await supabase
-        .from('communities')
-        .insert({
-          id: communityId,
-          name: name.trim(),
-          description: description.trim(),
-          grief_type: griefType,
-          member_count: 0,
-          online_count: 0,
-          created_at: new Date().toISOString()
-        });
+  .from('communities')
+  .insert({
+    id: communityId,
+    name: name.trim(),
+    description: description.trim(),
+    grief_type: griefType,
+    other_loss_description: griefType === 'other' ? otherLossDescription.trim() || null : null,
+    member_count: 0,
+    online_count: 0,
+    created_at: new Date().toISOString()
+  });
 
       if (communityError) throw communityError;
 
@@ -636,7 +638,34 @@ if (updateError) {
                 {uploadError}
               </div>
             )}
-
+{griefType === 'other' && (
+  <div style={baseStyles.spaceY2}>
+    <label style={{ ...baseStyles.block, ...baseStyles.textSm, ...baseStyles.fontMedium, ...baseStyles.textSton700 }}>
+      Please describe this loss
+    </label>
+    <input
+      type="text"
+      value={otherLossDescription}
+      onChange={(e) => setOtherLossDescription(e.target.value)}
+      placeholder="e.g., Loss of a home, community, or identity..."
+      style={{
+        ...baseStyles.wFull,
+        ...baseStyles.px4,
+        ...baseStyles.py2,
+        ...baseStyles.border,
+        ...baseStyles.borderSton300,
+        ...baseStyles.roundedLg,
+        outline: 'none'
+      }}
+      onFocus={(e) => (e.target.style.borderColor = '#f59e0b')}
+      onBlur={(e) => (e.target.style.borderColor = '#d1d5db')}
+      maxLength={100}
+    />
+    <p style={baseStyles.textXs}>
+      {otherLossDescription.length}/100 characters
+    </p>
+  </div>
+)}
             <div style={{ ...baseStyles.pt6, ...baseStyles.border, ...baseStyles.borderSton200, borderTopWidth: '1px', borderRightWidth: 0, borderBottomWidth: 0, borderLeftWidth: 0 }}>
               <Button
                 type="submit"
@@ -662,6 +691,8 @@ if (updateError) {
                         borderTopColor: 'transparent',
                         marginRight: '0.5rem'
                       }}
+
+                      
                     ></span>
                     Creating Community...
                   </span>
