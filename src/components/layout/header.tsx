@@ -20,7 +20,7 @@ import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
-import NotificationModal from '@/components/notifications/NotificationModal';
+import SuggestionModal from '@/components/modals/SuggestionModal';
 
 type CallInvitation = {
   caller_id: string;
@@ -42,7 +42,7 @@ export default function Header() {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false);
-
+const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const hamburgerMenuRef = useRef<HTMLDivElement>(null);
@@ -539,29 +539,29 @@ export default function Header() {
                       Dashboard
                     </Link>
                     <button
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        setIsNotificationModalOpen(true);
-                      }}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '0.5rem 1rem',
-                        fontSize: '0.875rem',
-                        color: '#3f3f46',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                    >
-                      <Bell size={16} />
-                      Notifications
-                    </button>
+  onClick={() => {
+    setIsMenuOpen(false);
+    setIsSuggestionModalOpen(true);
+  }}
+  style={{
+    width: '100%',
+    textAlign: 'left',
+    padding: '0.5rem 1rem',
+    fontSize: '0.875rem',
+    color: '#3f3f46',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+  }}
+  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')}
+  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+>
+  <MessageSquare size={16} />
+  Send Feedback
+</button>
                     <button
                       onClick={handleLogout}
                       style={{
@@ -760,14 +760,12 @@ export default function Header() {
           </div>
         </>
       )}
-
-      {/* Notification Modal */}
-      {isNotificationModalOpen && (
-        <NotificationModal
-          isOpen={true}
-          onClose={() => setIsNotificationModalOpen(false)}
-        />
-      )}
+{isSuggestionModalOpen && (
+  <SuggestionModal
+    isOpen={true}
+    onClose={() => setIsSuggestionModalOpen(false)}
+  />
+)}
     </>
   );
 }
