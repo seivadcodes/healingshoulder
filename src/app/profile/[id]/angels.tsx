@@ -1,4 +1,3 @@
-// src/app/profile/[id]/angels.tsx
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -28,10 +27,11 @@ interface Angel {
   photo_url?: string | null;
   birth_date?: string | null;
   death_date?: string | null;
-  sunrise?: string | null; // ✅ new
-  sunset?: string | null;  // ✅ new
+  sunrise?: string | null;
+  sunset?: string | null;
   tribute?: string | null;
-  grief_type: string;
+  grief_type: GriefType;
+  other_loss_description?: string | null; // 👈 ADDED
   is_private: boolean;
   allow_comments: boolean;
 }
@@ -53,12 +53,13 @@ const AddAngelForm = ({
   const [name, setName] = useState('');
   const [relationship, setRelationship] = useState('');
   const [griefType, setGriefType] = useState<GriefType>('other');
+  const [otherLossDescription, setOtherLossDescription] = useState(''); // 👈 ADDED
   const [tribute, setTribute] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [isPrivate, setIsPrivate] = useState(false);
   const [allowComments, setAllowComments] = useState(true);
-  const [sunrise, setSunrise] = useState(''); // ✅
-  const [sunset, setSunset] = useState('');   // ✅
+  const [sunrise, setSunrise] = useState('');
+  const [sunset, setSunset] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,16 +75,14 @@ const AddAngelForm = ({
       if (photoFile) {
         const fileExt = photoFile.name.split('.').pop();
         const fileName = `${profileId}/angels/${crypto.randomUUID()}.${fileExt}`;
+        
         const { error: uploadError } = await supabase.storage
           .from('angels-media')
           .upload(fileName, photoFile, { upsert: false });
 
         if (uploadError) throw uploadError;
-
-        const { data: publicUrlData } = supabase.storage
-          .from('angels-media')
-          .getPublicUrl(fileName);
-        photoUrl = publicUrlData?.publicUrl || null;
+        
+        photoUrl = fileName;
       }
 
       const { error: insertError } = await supabase
@@ -93,12 +92,14 @@ const AddAngelForm = ({
           name,
           relationship,
           grief_type: griefType,
+          other_loss_description:
+            griefType === 'other' ? (otherLossDescription.trim() || null) : null, // 👈 CONDITIONAL SAVE
           tribute,
           photo_url: photoUrl,
           is_private: isPrivate,
           allow_comments: allowComments,
-          sunrise: sunrise || null, // ✅
-          sunset: sunset || null,    // ✅
+          sunrise: sunrise || null,
+          sunset: sunset || null,
         });
 
       if (insertError) throw insertError;
@@ -244,6 +245,27 @@ const AddAngelForm = ({
             </select>
           </div>
 
+          {/* 👇 CONDITIONAL INPUT FOR "OTHER" */}
+          {griefType === 'other' && (
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: '600' }}>
+                Please describe this loss
+              </label>
+              <input
+                type="text"
+                value={otherLossDescription}
+                onChange={(e) => setOtherLossDescription(e.target.value)}
+                placeholder="e.g., Loss of a mentor, home, or community..."
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                }}
+              />
+            </div>
+          )}
+
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: '600' }}>
               A Few Words in Tribute (optional)
@@ -285,7 +307,7 @@ const AddAngelForm = ({
             </label>
           </div>
 
-          <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: ' center' }}>
+          <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <label>
               <input
                 type="checkbox"
@@ -374,6 +396,19 @@ export default function Angels({ profileId, isOwner }: AngelsProps) {
 
   const TRIBUTE_LIMIT = 200;
 
+  const getAngelPhotoUrl = (photoUrl: string | null) => {
+    if (!photoUrl) return null;
+    if (photoUrl.startsWith('http')) {
+      const urlParts = photoUrl.split('/');
+      const bucketIndex = urlParts.indexOf('angels-media');
+      if (bucketIndex !== -1) {
+        const path = urlParts.slice(bucketIndex + 1).join('/');
+        return `/api/media/angels-media/${path}`;
+      }
+    }
+    return `/api/media/angels-media/${photoUrl}`;
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {angels.length === 0 ? (
@@ -409,7 +444,6 @@ export default function Angels({ profileId, isOwner }: AngelsProps) {
                   maxWidth: '600px',
                 }}
               >
-                {/* ✏️ Edit icon — only for owner */}
                 {isOwner && (
                   <span
                     onClick={(e) => {
@@ -436,16 +470,16 @@ export default function Angels({ profileId, isOwner }: AngelsProps) {
                 )}
 
                 <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'flex-start' }}>
-                  {/* Larger image container: 96x96 */}
                   <div style={{ flexShrink: 0 }}>
                     {angel.photo_url ? (
                       <div style={{ width: '96px', height: '96px', borderRadius: '50%', overflow: 'hidden' }}>
                         <Image
-                          src={angel.photo_url}
+                          src={getAngelPhotoUrl(angel.photo_url)!}
                           alt={angel.name}
                           width={96}
                           height={96}
                           style={{ objectFit: 'cover' }}
+                          unoptimized
                         />
                       </div>
                     ) : (
@@ -478,52 +512,72 @@ export default function Angels({ profileId, isOwner }: AngelsProps) {
                       </p>
                     )}
 
-                    {displayTribute && (
-                      <p style={{ margin: 0, fontSize: '0.95rem', color: '#334155', marginBottom: '0.75rem' }}>
-                        {displayTribute}
-                        {shouldTruncate && (
-                          <span style={{ fontWeight: '600', color: '#dc2626', marginLeft: '0.25rem' }}>
-                            Read more
-                          </span>
-                        )}
+                    {/* 👇 DISPLAY CUSTOM LOSS DESCRIPTION IF APPLICABLE */}
+                    {angel.grief_type === 'other' ? (
+                      <p style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: '#64748b', fontStyle: 'italic' }}>
+                        {angel.other_loss_description || 'Other loss'}
+                      </p>
+                    ) : (
+                      <p style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: '#64748b' }}>
+                        {griefLabels[angel.grief_type]}
                       </p>
                     )}
 
-                    {/* Sunrise & Sunset – refined with green for sunrise */}
-{(angel.sunrise || angel.sunset) && (
-  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-    {angel.sunrise && (
-      <span
-        style={{
-          background: '#f0fdf4', // soft green (Tailwind's green-50)
-          color: '#166534',       // deep green text (green-700)
-          padding: '0.35rem 0.75rem',
-          borderRadius: '12px',
-          fontSize: '0.825rem',
-          fontWeight: '600',
-          border: '1px solid #bbf7d0', // subtle green border
-        }}
-      >
-        Sunrise: {angel.sunrise}
+                    {displayTribute && (
+  <p
+    style={{
+      margin: 0,
+      fontSize: '0.95rem',
+      color: '#334155',
+      marginBottom: '0.75rem',
+      overflowWrap: 'break-word',
+      wordBreak: 'break-word',
+      hyphens: 'auto',
+    }}
+  >
+    {displayTribute}
+    {shouldTruncate && (
+      <span style={{ fontWeight: '600', color: '#dc2626', marginLeft: '0.25rem' }}>
+        Read more
       </span>
     )}
-    {angel.sunset && (
-      <span
-        style={{
-          background: '#fdf2f8', // soft rose/mauve (Tailwind's pink-50)
-          color: '#9d174d',       // rich rose text (pink-700)
-          padding: '0.35rem 0.75rem',
-          borderRadius: '12px',
-          fontSize: '0.825rem',
-          fontWeight: '600',
-          border: '1px solid #fbcfe8', // delicate pink border
-        }}
-      >
-        Sunset: {angel.sunset}
-      </span>
-    )}
-  </div>
+  </p>
 )}
+
+                    {(angel.sunrise || angel.sunset) && (
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                        {angel.sunrise && (
+                          <span
+                            style={{
+                              background: '#f0fdf4',
+                              color: '#166534',
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '12px',
+                              fontSize: '0.825rem',
+                              fontWeight: '600',
+                              border: '1px solid #bbf7d0',
+                            }}
+                          >
+                            Sunrise: {angel.sunrise}
+                          </span>
+                        )}
+                        {angel.sunset && (
+                          <span
+                            style={{
+                              background: '#fdf2f8',
+                              color: '#9d174d',
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '12px',
+                              fontSize: '0.825rem',
+                              fontWeight: '600',
+                              border: '1px solid #fbcfe8',
+                            }}
+                          >
+                            Sunset: {angel.sunset}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

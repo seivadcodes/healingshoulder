@@ -21,6 +21,8 @@ const griefLabels = {
   other: 'Other Loss',
 };
 
+type GriefType = keyof typeof griefLabels;
+
 interface Angel {
   id: string;
   profile_id: string;
@@ -32,7 +34,7 @@ interface Angel {
   sunrise?: string | null;
   sunset?: string | null;
   tribute?: string | null;
-  grief_type: keyof typeof griefLabels;
+  grief_type: GriefType;
   is_private: boolean;
   allow_comments: boolean;
 }
@@ -41,8 +43,814 @@ interface AngelMemory {
   id: string;
   photo_url: string;
   caption?: string | null;
+  profile_id: string;
 }
 
+// Edit Memory Modal Component
+interface EditMemoryModalProps {
+  memory: AngelMemory;
+  angelId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+const EditMemoryModal = ({ memory, angelId, onClose, onSaved }: EditMemoryModalProps) => {
+  const [caption, setCaption] = useState(memory.caption || '');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (memory.photo_url) {
+      const url = getAngelMediaUrl(memory.photo_url);
+      setPreviewUrl(url);
+    }
+  }, [memory.photo_url]);
+
+  const getAngelMediaUrl = (photoUrl: string | null) => {
+    if (!photoUrl) return null;
+    if (photoUrl.startsWith('http')) {
+      const urlParts = photoUrl.split('/');
+      const bucketIndex = urlParts.indexOf('angels-media');
+      if (bucketIndex !== -1) {
+        const path = urlParts.slice(bucketIndex + 1).join('/');
+        return `/api/media/angels-media/${path}`;
+      }
+    }
+    return `/api/media/angels-media/${photoUrl}`;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+
+      let photoUrl = memory.photo_url;
+      
+      // Handle new photo upload
+      if (photoFile) {
+        const fileExt = photoFile.name.split('.').pop();
+        const fileName = `${memory.profile_id}/memories/${crypto.randomUUID()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('angels-media')
+          .upload(fileName, photoFile, { upsert: false });
+
+        if (uploadError) throw uploadError;
+        
+        photoUrl = fileName;
+      }
+
+      const { error: updateError } = await supabase
+        .from('angel_memories')
+        .update({
+          caption: caption || null,
+          photo_url: photoUrl,
+        })
+        .eq('id', memory.id);
+
+      if (updateError) throw updateError;
+
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      console.error('Failed to update memory:', err);
+      setError('Could not save changes. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm('Are you sure you want to delete this memory? This action cannot be undone.')) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const supabase = createClient();
+      
+      // Delete the memory
+      const { error: memoryError } = await supabase
+        .from('angel_memories')
+        .delete()
+        .eq('id', memory.id);
+
+      if (memoryError) throw memoryError;
+
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      console.error('Failed to delete memory:', err);
+      setError('Could not delete memory. Please try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(0,0,0,0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: '16px',
+          padding: '1.75rem',
+          width: '90%',
+          maxWidth: '500px',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.5rem', color: '#1e293b' }}>Edit Memory</h3>
+          <button
+            onClick={onClose}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              fontSize: '1.5rem', 
+              cursor: 'pointer',
+              color: '#64748b'
+            }}
+          >
+            &times;
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ 
+            background: '#fef2f2', 
+            color: '#dc2626', 
+            padding: '0.75rem', 
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            fontSize: '0.9rem'
+          }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          {previewUrl && (
+            <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'center' }}>
+              <div style={{ 
+                width: '200px', 
+                height: '200px', 
+                borderRadius: '12px', 
+                overflow: 'hidden',
+                border: '1px solid #e2e8f0'
+              }}>
+                <Image
+                  src={previewUrl}
+                  alt="Memory"
+                  width={200}
+                  height={200}
+                  style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+                  unoptimized
+                />
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Caption (optional)
+            </label>
+            <textarea
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              rows={4}
+              placeholder="Add a caption for this memory..."
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Change Photo (optional)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setPhotoFile(file);
+                  setPreviewUrl(URL.createObjectURL(file));
+                }
+              }}
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: '#f1f5f9',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                fontWeight: '600',
+                color: '#475569',
+                cursor: 'pointer',
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: '600',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+
+          <div style={{ 
+            borderTop: '1px solid #e2e8f0', 
+            paddingTop: '1rem',
+            marginTop: '1rem'
+          }}>
+            <button
+              type="button"
+              onClick={handleDelete}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                background: '#fee2e2',
+                border: '1px solid #fecaca',
+                color: '#dc2626',
+                borderRadius: '8px',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              Delete Memory
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Edit Angel Modal Component (unchanged from original)
+interface EditAngelModalProps {
+  angel: Angel;
+  onClose: () => void;
+  onSaved: (updatedAngel: Angel) => void;
+}
+
+const EditAngelModal = ({ angel, onClose, onSaved }: EditAngelModalProps) => {
+  const [formData, setFormData] = useState({
+    name: angel.name,
+    relationship: angel.relationship || '',
+    griefType: angel.grief_type,
+    tribute: angel.tribute || '',
+    sunrise: angel.sunrise || '',
+    sunset: angel.sunset || '',
+    isPrivate: angel.is_private,
+    allowComments: angel.allow_comments,
+  });
+  
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  useEffect(() => {
+    if (angel.photo_url) {
+      const url = getAngelMediaUrl(angel.photo_url);
+      setPreviewUrl(url);
+    }
+  }, [angel.photo_url]);
+
+  const getAngelMediaUrl = (photoUrl: string | null) => {
+    if (!photoUrl) return null;
+    if (photoUrl.startsWith('http')) {
+      const urlParts = photoUrl.split('/');
+      const bucketIndex = urlParts.indexOf('angels-media');
+      if (bucketIndex !== -1) {
+        const path = urlParts.slice(bucketIndex + 1).join('/');
+        return `/api/media/angels-media/${path}`;
+      }
+    }
+    return `/api/media/angels-media/${photoUrl}`;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+
+      let photoUrl = angel.photo_url;
+      
+      // Handle new photo upload
+      if (photoFile) {
+        const fileExt = photoFile.name.split('.').pop();
+        const fileName = `${angel.profile_id}/angels/${crypto.randomUUID()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('angels-media')
+          .upload(fileName, photoFile, { upsert: false });
+
+        if (uploadError) throw uploadError;
+        
+        photoUrl = fileName;
+      }
+
+      const { data, error: updateError } = await supabase
+        .from('angels')
+        .update({
+          name: formData.name,
+          relationship: formData.relationship || null,
+          grief_type: formData.griefType,
+          tribute: formData.tribute || null,
+          photo_url: photoUrl,
+          is_private: formData.isPrivate,
+          allow_comments: formData.allowComments,
+          sunrise: formData.sunrise || null,
+          sunset: formData.sunset || null,
+        })
+        .eq('id', angel.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      onSaved(data);
+      onClose();
+    } catch (err: unknown) {
+      console.error('Failed to update angel:', err);
+      setError('Could not save changes. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm('Are you sure you want to delete this memorial? This action cannot be undone.')) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const supabase = createClient();
+      
+      // Delete associated memories first
+      const { error: memoriesError } = await supabase
+        .from('angel_memories')
+        .delete()
+        .eq('angel_id', angel.id);
+
+      if (memoriesError) throw memoriesError;
+
+      // Delete the angel
+      const { error: angelError } = await supabase
+        .from('angels')
+        .delete()
+        .eq('id', angel.id);
+
+      if (angelError) throw angelError;
+
+      // Redirect to profile page
+      window.location.href = `/profile/${angel.profile_id}`;
+    } catch (err: unknown) {
+      console.error('Failed to delete angel:', err);
+      setError('Could not delete memorial. Please try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(0,0,0,0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: '16px',
+          padding: '1.75rem',
+          width: '90%',
+          maxWidth: '500px',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.5rem', color: '#1e293b' }}>Edit Memorial</h3>
+          <button
+            onClick={onClose}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              fontSize: '1.5rem', 
+              cursor: 'pointer',
+              color: '#64748b'
+            }}
+          >
+            &times;
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ 
+            background: '#fef2f2', 
+            color: '#dc2626', 
+            padding: '0.75rem', 
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            fontSize: '0.9rem'
+          }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Name *
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Relationship
+            </label>
+            <input
+              type="text"
+              value={formData.relationship}
+              onChange={(e) => setFormData({ ...formData, relationship: e.target.value })}
+              placeholder="e.g., Mother, Best friend"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Sunrise (optional)
+            </label>
+            <input
+              type="date"
+              value={formData.sunrise}
+              onChange={(e) => setFormData({ ...formData, sunrise: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Sunset (optional)
+            </label>
+            <input
+              type="date"
+              value={formData.sunset}
+              onChange={(e) => setFormData({ ...formData, sunset: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Grief Type *
+            </label>
+            <select
+              value={formData.griefType}
+              onChange={(e) => setFormData({ ...formData, griefType: e.target.value as GriefType })}
+              required
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                background: 'white',
+              }}
+            >
+              {(Object.entries(griefLabels) as [GriefType, string][]).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Tribute (optional)
+            </label>
+            <textarea
+              value={formData.tribute}
+              onChange={(e) => setFormData({ ...formData, tribute: e.target.value })}
+              rows={3}
+              placeholder="Share a few words in tribute..."
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#334155' }}>
+              Photo
+            </label>
+            {previewUrl && (
+              <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ 
+                  width: '120px', 
+                  height: '120px', 
+                  borderRadius: '50%', 
+                  overflow: 'hidden',
+                  marginBottom: '0.5rem'
+                }}>
+                  <Image
+                    src={previewUrl}
+                    alt="Current"
+                    width={120}
+                    height={120}
+                    style={{ objectFit: 'cover' }}
+                    unoptimized
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhotoFile(null);
+                    setPreviewUrl(null);
+                    setFormData({ ...formData }); // Trigger re-render
+                  }}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #e2e8f0',
+                    color: '#64748b',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Remove Photo
+                </button>
+              </div>
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setPhotoFile(file);
+                  setPreviewUrl(URL.createObjectURL(file));
+                }
+              }}
+              style={{ width: '100%' }}
+            />
+            <p style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.5rem' }}>
+              Upload a new photo or keep the current one
+            </p>
+          </div>
+
+          <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={formData.isPrivate}
+                onChange={(e) => setFormData({ ...formData, isPrivate: e.target.checked })}
+              />
+              <span style={{ color: '#334155' }}>Keep this memorial private</span>
+            </label>
+            
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={formData.allowComments}
+                onChange={(e) => setFormData({ ...formData, allowComments: e.target.checked })}
+              />
+              <span style={{ color: '#334155' }}>Allow kind words from others</span>
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: '#f1f5f9',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                fontWeight: '600',
+                color: '#475569',
+                cursor: 'pointer',
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: '600',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+
+          <div style={{ 
+            borderTop: '1px solid #e2e8f0', 
+            paddingTop: '1rem',
+            marginTop: '1rem'
+          }}>
+            <button
+              type="button"
+              onClick={() => setDeleteConfirm(true)}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                background: '#fee2e2',
+                border: '1px solid #fecaca',
+                color: '#dc2626',
+                borderRadius: '8px',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              Delete Memorial
+            </button>
+          </div>
+        </form>
+
+        {deleteConfirm && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1001,
+          }}>
+            <div style={{
+              background: '#fff',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              maxWidth: '400px',
+              width: '90%',
+            }}>
+              <h4 style={{ margin: '0 0 1rem', color: '#1e293b' }}>
+                Delete Memorial?
+              </h4>
+              <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>
+                Are you sure you want to delete this memorial? This action cannot be undone and will remove all memories and comments associated with it.
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  onClick={() => setDeleteConfirm(false)}
+                  style={{
+                    flex: 1,
+                    padding: '0.5rem',
+                    background: '#f1f5f9',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={saving}
+                  style={{
+                    flex: 1,
+                    padding: '0.5rem',
+                    background: '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    opacity: saving ? 0.7 : 1,
+                  }}
+                >
+                  {saving ? 'Deleting...' : 'Delete Forever'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Main Component
 export default function AngelDetailPage() {
   const params = useParams<{ id: string }>();
   const [angel, setAngel] = useState<Angel | null>(null);
@@ -50,6 +858,21 @@ export default function AngelDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAddMemoryModalOpen, setIsAddMemoryModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentUserProfileId, setCurrentUserProfileId] = useState<string | null>(null);
+  const [expandedMemories, setExpandedMemories] = useState<Set<string>>(new Set());
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUserProfileId(user.id);
+      }
+    };
+    fetchUser();
+  }, []);
 
   useEffect(() => {
     const fetchAngelAndMemories = async () => {
@@ -74,7 +897,7 @@ export default function AngelDetailPage() {
 
         const { data: memoryData, error: memoryError } = await supabase
           .from('angel_memories')
-          .select('id, photo_url, caption')
+          .select('id, photo_url, caption, profile_id')
           .eq('angel_id', id)
           .order('created_at', { ascending: false });
 
@@ -100,10 +923,35 @@ export default function AngelDetailPage() {
     const supabase = createClient();
     const { data } = await supabase
       .from('angel_memories')
-      .select('id, photo_url, caption')
+      .select('id, photo_url, caption, profile_id')
       .eq('angel_id', angel.id)
       .order('created_at', { ascending: false });
     setMemories(data || []);
+  };
+
+  const getAngelMediaUrl = (photoUrl: string | null) => {
+    if (!photoUrl) return null;
+    if (photoUrl.startsWith('http')) {
+      const urlParts = photoUrl.split('/');
+      const bucketIndex = urlParts.indexOf('angels-media');
+      if (bucketIndex !== -1) {
+        const path = urlParts.slice(bucketIndex + 1).join('/');
+        return `/api/media/angels-media/${path}`;
+      }
+    }
+    return `/api/media/angels-media/${photoUrl}`;
+  };
+
+  const toggleExpand = (memoryId: string) => {
+    setExpandedMemories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(memoryId)) {
+        newSet.delete(memoryId);
+      } else {
+        newSet.add(memoryId);
+      }
+      return newSet;
+    });
   };
 
   if (loading) {
@@ -122,11 +970,13 @@ export default function AngelDetailPage() {
     );
   }
 
+  const isOwner = currentUserProfileId === angel.profile_id;
+
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1.5rem' }}>
+    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '4.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <Link
-          href={`/profile/${angel.profile_id}/angels`}
+          href={`/profile/${angel.profile_id}`}
           style={{
             color: '#3b82f6',
             textDecoration: 'none',
@@ -134,8 +984,29 @@ export default function AngelDetailPage() {
             fontWeight: '600',
           }}
         >
-          ← Back to memorials
+          ← Back to profile
         </Link>
+        
+        {isOwner && (
+          <button
+            onClick={() => setIsEditModalOpen(true)}
+            style={{
+              background: 'none',
+              border: '1px solid #3b82f6',
+              color: '#3b82f6',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              fontSize: '0.95rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            <span>✏️</span> Edit Memorial
+          </button>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
@@ -151,15 +1022,35 @@ export default function AngelDetailPage() {
               position: 'relative',
             }}
           >
+            {isOwner && angel.is_private && (
+              <div style={{
+                position: 'absolute',
+                top: '1rem',
+                right: '1rem',
+                background: '#fef3c7',
+                color: '#92400e',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '12px',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+              }}>
+                <span>🔒</span> Private
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
               {angel.photo_url ? (
                 <div style={{ width: '130px', height: '130px', borderRadius: '50%', overflow: 'hidden' }}>
                   <Image
-                   src={`/api/media/${angel.photo_url}`}
+                    src={getAngelMediaUrl(angel.photo_url)!}
                     alt={angel.name}
                     width={130}
                     height={130}
                     style={{ objectFit: 'cover' }}
+                    unoptimized
                   />
                 </div>
               ) : (
@@ -197,14 +1088,24 @@ export default function AngelDetailPage() {
             </div>
 
             {angel.tribute && (
-              <div style={{ marginTop: '1.75rem', padding: '1.25rem', background: '#f9fafb', borderRadius: '10px' }}>
-                <blockquote style={{ margin: 0, fontStyle: 'italic', color: '#334155', lineHeight: 1.7, fontSize: '1.05rem' }}>
-                  “{angel.tribute}”
-                </blockquote>
-              </div>
+             <div style={{ marginTop: '1.75rem', padding: '1.25rem', background: '#f9fafb', borderRadius: '10px' }}>
+    <blockquote
+  style={{
+    margin: 0,
+    fontStyle: 'italic',
+    color: '#334155',
+    lineHeight: 1.7,
+    fontSize: '1.05rem',
+    overflowWrap: 'break-word',
+    wordBreak: 'break-word',
+    hyphens: 'auto',
+  }}
+>
+  &ldquo;{angel.tribute}&rdquo;
+</blockquote>
+  </div>
             )}
 
-            {/* ✅ Updated: Styled sunrise/sunset tags side by side */}
             {(angel.sunrise || angel.sunset) && (
               <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                 {angel.sunrise && (
@@ -257,21 +1158,27 @@ export default function AngelDetailPage() {
 
         {/* Gallery & Add Button */}
         <div style={{ flex: 1, minWidth: '280px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <button
-            onClick={() => setIsAddMemoryModalOpen(true)}
-            style={{
-              padding: '0.75rem 1.25rem',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '1rem',
-            }}
-          >
-            ➕ Add Memory
-          </button>
+          {isOwner && (
+            <button
+              onClick={() => setIsAddMemoryModalOpen(true)}
+              style={{
+                padding: '0.75rem 1.25rem',
+                backgroundColor: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                fontSize: '1rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <span>➕</span> Add Memory
+            </button>
+          )}
 
           {memories.length > 0 ? (
             <div
@@ -287,61 +1194,104 @@ export default function AngelDetailPage() {
                 Shared Memories
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {memories.map((memory) => (
-                  <div
-                    key={memory.id}
-                    style={{
-                      background: '#f9fafb',
-                      borderRadius: '10px',
-                      padding: '0.75rem',
-                      border: '1px solid #e2e8f0',
-                    }}
-                  >
-                    <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
-                      <Image
-                        src={`/api/media/${memory.photo_url}`}
-                        alt={`Memory for ${angel.name}`}
-                        width={280}
-                        height={280}
-                        style={{
-                          borderRadius: '8px',
-                          objectFit: 'contain',
-                          width: '100%',
-                          aspectRatio: '1',
-                        }}
-                      />
-                      {memory.caption && (
-                        <div
+                {memories.map((memory) => {
+                  const memoryUrl = getAngelMediaUrl(memory.photo_url);
+                  const isMemoryOwner = currentUserProfileId === memory.profile_id;
+                  const isExpanded = expandedMemories.has(memory.id);
+                  const shouldShowReadMore = memory.caption && memory.caption.split(' ').length > 25;
+                  
+                  return (
+                    <div
+                      key={memory.id}
+                      style={{
+                        background: '#f9fafb',
+                        borderRadius: '10px',
+                        padding: '0.75rem',
+                        border: '1px solid #e2e8f0',
+                        position: 'relative',
+                      }}
+                    >
+                      {isMemoryOwner && (
+                        <button
+                          onClick={() => setEditingMemoryId(memory.id)}
                           style={{
                             position: 'absolute',
-                            bottom: '0',
-                            left: '0',
-                            right: '0',
-                            background: 'rgba(0,0,0,0.6)',
-                            color: 'white',
-                            fontSize: '0.8rem',
-                            padding: '4px 8px',
-                            borderBottomLeftRadius: '8px',
-                            borderBottomRightRadius: '8px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            top: '8px',
+                            right: '8px',
+                            background: 'rgba(255,255,255,0.8)',
+                            border: 'none',
+                            borderRadius: '50%',
+                            width: '28px',
+                            height: '28px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            zIndex: 10,
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                           }}
+                          aria-label="Edit memory"
                         >
-                          {memory.caption}
-                        </div>
+                          ✏️
+                        </button>
                       )}
+                      
+                      <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
+                        {memoryUrl && (
+                          <Image
+                            src={memoryUrl}
+                            alt={`Memory for ${angel.name}`}
+                            width={280}
+                            height={280}
+                            style={{
+                              borderRadius: '8px',
+                              objectFit: 'contain',
+                              width: '100%',
+                              aspectRatio: '1',
+                            }}
+                            unoptimized
+                          />
+                        )}
+                      </div>
+
+                      {memory.caption && (
+  <div style={{ marginTop: '8px', position: 'relative' }}>
+    <p style={{ margin: 0, fontSize: '0.95rem', color: '#334155',  overflowWrap: 'break-word', lineHeight: 1.5 }}>
+      {isExpanded
+        ? memory.caption
+        : memory.caption.length > 120
+          ? memory.caption.substring(0, 120) + '...'
+          : memory.caption}
+    </p>
+    {memory.caption.length > 120 && !isExpanded && (
+      <button
+        onClick={() => toggleExpand(memory.id)}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#3b82f6',
+          fontWeight: '500',
+          fontSize: '0.85rem',
+          cursor: 'pointer',
+          marginTop: '4px',
+        }}
+      >
+        Read more
+      </button>
+    )}
+  </div>
+)}
+                      <HeartsAndComments
+                        itemId={memory.id}
+                        itemType="memory"
+                        allowComments={true}
+                        styleOverrides={{
+                          marginTop: '16px',
+                        }}
+                      />
                     </div>
-                    <HeartsAndComments
-                      itemId={angel.id}
-                      itemType="angel"
-                      allowComments={angel.allow_comments}
-                      styleOverrides={{
-                        marginTop: '24px',
-                      }}
-                    />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -355,7 +1305,27 @@ export default function AngelDetailPage() {
                 color: '#94a3b8',
               }}
             >
-              No shared memories yet.
+              {isOwner ? (
+                <>
+                  <p style={{ margin: '0 0 1rem' }}>No shared memories yet.</p>
+                  <button
+                    onClick={() => setIsAddMemoryModalOpen(true)}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add First Memory
+                  </button>
+                </>
+              ) : (
+                'No shared memories yet.'
+              )}
             </div>
           )}
         </div>
@@ -367,6 +1337,26 @@ export default function AngelDetailPage() {
           angelName={angel.name}
           onClose={() => setIsAddMemoryModalOpen(false)}
           onMemoryAdded={refetchMemories}
+        />
+      )}
+
+      {isEditModalOpen && angel && (
+        <EditAngelModal
+          angel={angel}
+          onClose={() => setIsEditModalOpen(false)}
+          onSaved={(updatedAngel) => {
+            setAngel(updatedAngel);
+            setIsEditModalOpen(false);
+          }}
+        />
+      )}
+
+      {editingMemoryId && (
+        <EditMemoryModal
+          memory={memories.find(m => m.id === editingMemoryId)!}
+          angelId={angel.id}
+          onClose={() => setEditingMemoryId(null)}
+          onSaved={refetchMemories}
         />
       )}
     </div>

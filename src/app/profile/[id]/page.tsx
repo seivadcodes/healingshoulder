@@ -1,4 +1,3 @@
-// src/app/profile/[id]/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -8,7 +7,6 @@ import { PostCard } from '@/components/PostCard';
 import { GriefType } from '@/app/dashboard/useDashboardLogic';
 import { useAuth } from '@/hooks/useAuth';
 import { useCall } from '@/context/CallContext';
-import Image from 'next/image';
 import Angels from './angels';
 import SendMessageOverlay from '@/components/modals/SendMessageOverlay';
 
@@ -32,21 +30,22 @@ interface Profile {
   country: string | null;
   avatar_url: string | null;
   about?: string | null;
+  is_anonymous: boolean;
 }
 
-interface Post {
+interface DisplayPost {
   id: string;
   userId: string;
   text: string;
-  mediaUrl: string | null;
-  mediaUrls?: string[];
+  mediaUrl?: string;
+  mediaUrls: string[];
   griefTypes: GriefType[];
   createdAt: Date;
   likes: number;
   isLiked: boolean;
   commentsCount: number;
   isAnonymous: boolean;
-  user?: {
+  user: {
     id: string;
     fullName: string | null;
     avatarUrl: string | null;
@@ -60,7 +59,7 @@ export default function PublicProfile() {
   const { startCall } = useCall();
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<DisplayPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -89,9 +88,10 @@ export default function PublicProfile() {
         setLoading(true);
         setError(null);
 
+        // === 1. Fetch profile ===
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
-          .select('*')
+          .select('id, full_name, grief_types, country, avatar_url, about, is_anonymous')
           .eq('id', id)
           .single();
 
@@ -100,61 +100,69 @@ export default function PublicProfile() {
           return;
         }
 
-        // ✅ Correctly proxy main profile avatar
-        const avatarProxyUrl = profileData.avatar_url
-          ? `/api/media/avatars/${profileData.avatar_url}`
-          : null;
+        // ✅ Proxy avatar ONLY if NOT anonymous
+        let avatarProxyUrl: string | null = null;
+        if (!profileData.is_anonymous && profileData.avatar_url) {
+          avatarProxyUrl = `/api/media/avatars/${profileData.avatar_url}`;
+        }
 
-        setProfile({
+        const profileWithAvatar = {
           ...profileData,
           avatar_url: avatarProxyUrl,
-        });
+        };
 
+        setProfile(profileWithAvatar);
+
+        // === 2. Fetch posts from GLOBAL `posts` table ===
         const { data: postData, error: postError } = await supabase
           .from('posts')
-          .select(`
-            *,
-            profiles: user_id (
-              id,
-              full_name,
-              avatar_url,
-              is_anonymous
-            )
-          `)
+          .select('*')
           .eq('user_id', id)
           .eq('is_anonymous', false)
           .order('created_at', { ascending: false });
 
         if (postError) {
-          console.error('Failed to load posts:', postError);
+          console.error('Post fetch error:', postError);
         }
 
-        // ✅ FIXED: Use /api/media/avatars/... for post author avatars
+        // === 3. Transform posts for PostCard ===
+        const validGriefTypes = [
+          'parent', 'child', 'spouse', 'sibling', 'friend',
+          'pet', 'miscarriage', 'caregiver', 'suicide', 'other'
+        ] as const;
+
         const mappedPosts = (postData || []).map((p) => {
-          const userAvatar = p.profiles?.avatar_url
-            ? `/api/media/avatars/${p.profiles.avatar_url}` // ✅ CORRECT PATH
-            : null;
+          const mediaUrls = Array.isArray(p.media_urls)
+            ? p.media_urls.map((path: string) => `/api/media/posts/${path}`)
+            : [];
+
+          const filteredGriefTypes = (p.grief_types || [])
+            .filter((t: string) => validGriefTypes.includes(t as GriefType))
+            .map((t: string) => t as GriefType);
+
+          const griefTypes = filteredGriefTypes.length > 0 ? filteredGriefTypes : ['other'];
+
+          // ✅ PASS RAW PATH (not proxied!) — PostCard will proxy it
+          const authorAvatar = !profileData.is_anonymous ? profileData.avatar_url : null;
 
           return {
             id: p.id,
             userId: p.user_id,
             text: p.text,
-            mediaUrl: p.media_url || null,
-            mediaUrls: p.media_urls || undefined,
-            griefTypes: p.grief_types as GriefType[],
+            mediaUrl: mediaUrls[0],
+            mediaUrls,
+            griefTypes,
             createdAt: new Date(p.created_at),
             likes: p.likes_count || 0,
             isLiked: false,
             commentsCount: p.comments_count || 0,
-            isAnonymous: false,
-            user: p.profiles
-              ? {
-                  id: p.profiles.id,
-                  fullName: p.profiles.full_name,
-                  avatarUrl: userAvatar, // ✅ Now a valid proxied URL
-                  isAnonymous: p.profiles.is_anonymous ?? false,
-                }
-              : undefined,
+            isAnonymous: p.is_anonymous || profileData.is_anonymous,
+            user: {
+              id: p.user_id,
+              fullName: profileData.is_anonymous ? null : profileData.full_name,
+              avatarUrl: authorAvatar, // ← raw path like "avatars/xyz.jpg" or null
+              isAnonymous: profileData.is_anonymous,
+            },
           };
         });
 
@@ -168,7 +176,7 @@ export default function PublicProfile() {
     };
 
     fetchProfileAndPosts();
-  }, [id, user]);
+  }, [id]);
 
   const handleCall = async () => {
     if (!profile?.id || !profile.full_name) return;
@@ -212,7 +220,8 @@ export default function PublicProfile() {
   const isOwner = user?.id === profile.id;
 
   return (
-    <div style={{ padding: '1rem', maxWidth: '1200px', margin: '2rem auto', fontFamily: 'system-ui' }}>
+    <div style={{ padding: '3.5rem', maxWidth: '1200px', margin: '2rem auto', fontFamily: 'system-ui' }}>
+      {/* Profile Header */}
       <div
         style={{
           background: '#fff',
@@ -240,16 +249,14 @@ export default function PublicProfile() {
           }}
         >
           {profile.avatar_url ? (
-            <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden' }}>
-              <img
-                src={profile.avatar_url}
-                alt={name}
-                width={72}
-                height={72}
-                style={{ objectFit: 'cover', borderRadius: '50%' }}
-                loading="lazy"
-              />
-            </div>
+            <img
+              src={profile.avatar_url}
+              alt={name}
+              width={72}
+              height={72}
+              style={{ objectFit: 'cover', borderRadius: '50%' }}
+              loading="lazy"
+            />
           ) : (
             name.charAt(0).toUpperCase()
           )}
@@ -308,8 +315,6 @@ export default function PublicProfile() {
                 cursor: 'pointer',
                 minWidth: '120px',
               }}
-              onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#2563eb')}
-              onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#3b82f6')}
             >
               📞 Call
             </button>
@@ -327,19 +332,16 @@ export default function PublicProfile() {
                 cursor: 'pointer',
                 minWidth: '120px',
               }}
-              onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#059669')}
-              onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#10b981')}
             >
               💬 Message {firstName}
             </button>
           </div>
         )}
 
-        <p style={{ fontSize: '0.9rem', color: '#64748b', marginTop: '1rem' }}>
-          A space to share and be heard.
-        </p>
+       
       </div>
 
+      {/* Tabs / Columns */}
       {isMobile ? (
         <div style={{ width: '100%' }}>
           <div
@@ -378,7 +380,7 @@ export default function PublicProfile() {
                 borderRadius: '4px',
               }}
             >
-              Loved Ones
+              Angels
             </button>
           </div>
 
@@ -395,7 +397,6 @@ export default function PublicProfile() {
                     <PostCard
                       key={post.id}
                       post={post}
-                      isOwner={isOwner}
                       canDelete={isOwner}
                       showAuthor={true}
                       context="profile"
@@ -409,9 +410,7 @@ export default function PublicProfile() {
             </div>
           ) : (
             <div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', color: '#1e293b' }}>
-                Loved Ones Remembered
-              </h3>
+              
               <Angels profileId={id} isOwner={isOwner} />
             </div>
           )}
@@ -430,7 +429,6 @@ export default function PublicProfile() {
                   <PostCard
                     key={post.id}
                     post={post}
-                    isOwner={isOwner}
                     canDelete={isOwner}
                     showAuthor={true}
                     context="profile"
@@ -443,9 +441,7 @@ export default function PublicProfile() {
             )}
           </div>
           <div className="angels-column">
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', color: '#1e293b' }}>
-              Loved Ones Remembered
-            </h3>
+            
             <Angels profileId={id} isOwner={isOwner} />
           </div>
         </div>

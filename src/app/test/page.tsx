@@ -1,497 +1,296 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect, FormEvent, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { Phone, Users, User, MoreVertical, AlertTriangle, Camera } from 'lucide-react';
-import Link from 'next/link';
-import ReportModal from '@/components/modals/ReportModal';
-import { useCall } from '@/context/CallContext';
-import { useAuth } from '@/hooks/useAuth';
+import { PostCard } from '@/components/PostCard';
+import { Camera } from 'lucide-react';
 
-interface CallHistoryItem {
+// Match your actual DB schema
+interface DbPost {
   id: string;
-  type: 'one-on-one' | 'group';
-  room_id: string;
-  started_at: string;
-  otherParticipant?: { 
-    id: string; 
-    name: string;
-    avatar_url?: string;
+  user_id: string;
+  text: string;
+  media_urls: string[];
+  grief_types: string[];
+  created_at: string;
+  likes_count: number;
+  comments_count: number;
+  is_anonymous: boolean;
+}
+
+interface Profile {
+  id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  is_anonymous: boolean;
+}
+
+// Shape expected by PostCard
+interface DisplayPost {
+  id: string;
+  userId: string;
+  text: string;
+  mediaUrl?: string;
+  mediaUrls: string[];
+  griefTypes: ('parent' | 'child' | 'spouse' | 'sibling' | 'friend' | 'pet' | 'miscarriage' | 'caregiver' | 'suicide' | 'other')[];
+  createdAt: Date;
+  likes: number;
+  isLiked: boolean;
+  commentsCount: number;
+  isAnonymous: boolean;
+  user: {
+    id: string;
+    fullName: string | null;
+    avatarUrl: string | null;
+    isAnonymous: boolean;
   };
 }
 
-export default function CallHistoryPage() {
-  const [calls, setCalls] = useState<CallHistoryItem[]>([]);
+export default function TestPostsPage() {
+  const [displayPosts, setDisplayPosts] = useState<DisplayPost[]>([]);
+  const [content, setContent] = useState('');
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
   const router = useRouter();
-const [reportTarget, setReportTarget] = useState<{ id: string; type: 'call' } | null>(null);
- const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-const { startCall } = useCall();
-const { user: currentUser } = useAuth(); 
-useEffect(() => {
-    const fetchCallHistory = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          router.push('/auth');
-          return;
-        }
-        const userId = session.user.id;
-        setCurrentUserId(userId); 
 
-        // === 1:1 Calls ===
-        const { data: oneOnOneCalls, error: oneOnError } = await supabase
-          .from('quick_connect_requests')
-          .select('room_id, user_id, acceptor_id, call_started_at')
-          .or(`user_id.eq.${userId},acceptor_id.eq.${userId}`)
-          .not('call_started_at', 'is', null)
-          .order('call_started_at', { ascending: false });
-
-        if (oneOnError) throw oneOnError;
-
-        // === Group Calls: get rooms user joined, then check if call_started_at exists ===
-        const { data: groupRooms, error: groupRoomError } = await supabase
-          .from('room_participants')
-          .select('room_id')
-          .eq('user_id', userId);
-
-        if (groupRoomError) throw groupRoomError;
-
-        let groupCalls: { room_id: string; call_started_at: string }[] = [];
-        if (groupRooms.length > 0) {
-          const roomIds = groupRooms.map(r => r.room_id);
-          const { data: groupData, error: groupError } = await supabase
-            .from('quick_group_requests')
-            .select('room_id, call_started_at')
-            .in('room_id', roomIds)
-            .not('call_started_at', 'is', null)
-            .order('call_started_at', { ascending: false });
-
-          if (groupError) throw groupError;
-          groupCalls = groupData || [];
-        }
-
-        // === Fetch participant names and avatar URLs for 1:1 ===
-        const participantIds = new Set<string>();
-        oneOnOneCalls.forEach(call => {
-          if (call.user_id !== userId) participantIds.add(call.user_id);
-          if (call.acceptor_id !== userId) participantIds.add(call.acceptor_id);
-        });
-
-        const profileMap = new Map<string, { name: string; avatar_url?: string }>();
-        if (participantIds.size > 0) {
-          const { data: profiles, error: profileError } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, avatar_url') // Added avatar_url
-            .in('id', Array.from(participantIds));
-
-          if (profileError) throw profileError;
-          
-          profiles?.forEach(p => {
-            profileMap.set(p.id, {
-              name: p.full_name || p.email || 'Anonymous',
-              avatar_url: p.avatar_url
-            });
-          });
-        }
-
-        // === Build history ===
-        const historyItems: CallHistoryItem[] = [];
-
-        oneOnOneCalls.forEach(call => {
-          const otherId = call.user_id === userId ? call.acceptor_id : call.user_id;
-          const profile = profileMap.get(otherId) || { name: 'Unknown' };
-          
-          historyItems.push({
-            id: call.room_id,
-            type: 'one-on-one',
-            room_id: call.room_id,
-            started_at: call.call_started_at,
-            otherParticipant: {
-              id: otherId,
-              name: profile.name,
-              avatar_url: profile.avatar_url
-            },
-          });
-        });
-
-        groupCalls.forEach(call => {
-          historyItems.push({
-            id: call.room_id,
-            type: 'group',
-            room_id: call.room_id,
-            started_at: call.call_started_at,
-          });
-        });
-
-        historyItems.sort((a, b) =>
-          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-        );
-
-        setCalls(historyItems);
-      } catch (err) {
-        console.error('Call history error:', err);
-        const errorMessage = err instanceof Error 
-          ? err.message 
-          : 'Failed to load call history';
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
+  // Fetch all posts from `posts` table + enrich with user profiles
+  const fetchPosts = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        router.push('/auth');
+        return;
       }
-    };
 
-    fetchCallHistory();
-  }, [supabase, router]);
+      // 1. Fetch posts
+      const { data: posts, error: postError } = await supabase
+        .from('posts')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-  const formatDate = (isoString: string): string => {
-    return new Date(isoString).toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+      if (postError) throw postError;
+
+      if (posts.length === 0) {
+        setDisplayPosts([]);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Get unique user IDs
+      const userIds = [...new Set(posts.map((p: DbPost) => p.user_id))];
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, is_anonymous')
+        .in('id', userIds);
+
+      if (profileError) throw profileError;
+
+      const profileMap = new Map<string, Profile>();
+      profiles.forEach((p) => profileMap.set(p.id, p));
+
+      // 3. Transform for PostCard
+      const transformed: DisplayPost[] = posts.map((post) => {
+        const profile = profileMap.get(post.user_id) || {
+          id: post.user_id,
+          full_name: 'Anonymous',
+          avatar_url: null,
+          is_anonymous: true,
+        };
+
+        const validGriefTypes = [
+          'parent', 'child', 'spouse', 'sibling', 'friend',
+          'pet', 'miscarriage', 'caregiver', 'suicide', 'other'
+        ] as const;
+
+        const griefTypes = post.grief_types
+          .filter(t => validGriefTypes.includes(t as any))
+          .map(t => t as any) || ['other'];
+
+        const mediaUrls = Array.isArray(post.media_urls)
+          ? post.media_urls.map(url => `/api/media/posts/${url}`) // 👈 assumes proxy route
+          : [];
+
+        return {
+          id: post.id,
+          userId: post.user_id,
+          text: post.text,
+          mediaUrl: mediaUrls[0],
+          mediaUrls,
+          griefTypes,
+          createdAt: new Date(post.created_at),
+          likes: post.likes_count || 0,
+          isLiked: false, // would require join on likes
+          commentsCount: post.comments_count || 0,
+          isAnonymous: post.is_anonymous || profile.is_anonymous,
+          user: {
+            id: profile.id,
+            fullName: profile.is_anonymous ? null : profile.full_name,
+            avatarUrl: profile.is_anonymous ? null : profile.avatar_url,
+            isAnonymous: profile.is_anonymous,
+          },
+        };
+      });
+
+      setDisplayPosts(transformed);
+    } catch (err) {
+      console.error('Failed to fetch posts:', err);
+      alert('Failed to load posts. Check console.');
+    } finally {
+      setLoading(false);
+    }
   };
 
+  useEffect(() => {
+    fetchPosts();
+  }, []);
 
-  const handleReCall = async (call: CallHistoryItem) => {
-  if (call.type === 'group') {
-    // Optional: handle group re-call differently, or disable
-    // For now, we'll skip group re-calls
-    alert('Rejoining group calls is not supported yet.');
-    return;
-  }
+  const uploadMedia = async (files: File[]) => {
+    const urls: string[] = [];
+    const timestamp = Date.now();
 
-  if (!call.otherParticipant?.id || !call.otherParticipant?.name) {
-    console.warn('Missing participant info for re-call');
-    return;
-  }
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const ext = file.name.split('.').pop() || 'jpg';
+      const fileName = `${timestamp}_${i}.${ext}`;
+      const filePath = `public/${fileName}`;
 
-  // Match the profile page's call signature
-  await startCall(
-    call.otherParticipant.id,           // recipientId
-    call.otherParticipant.name,         // recipientName
-    'audio',                            // callType
-    currentUser?.id || currentUserId!,  // callerId — fix the bug!
-    call.room_id                        // roomId (can be reused or generate new)
-  );
-};
+      const { error } = await supabase.storage
+        .from('posts') // your bucket
+        .upload(filePath, file, { upsert: false });
 
- const handleReport = (callId: string) => {
-  setReportTarget({ id: callId, type: 'call' });
-  setOpenMenuId(null); // Close kebab menu
-};
+      if (error) throw error;
+
+      urls.push(fileName); // store path only (e.g., "public/12345_0.jpg")
+    }
+    return urls;
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.push('/auth');
+      return;
+    }
+
+    if (!content.trim() && mediaFiles.length === 0) return;
+
+    setSubmitting(true);
+    try {
+      let mediaUrls: string[] = [];
+      if (mediaFiles.length > 0) {
+        mediaUrls = await uploadMedia(mediaFiles);
+      }
+
+      const { data: newPost, error: insertError } = await supabase
+        .from('posts')
+        .insert({
+          user_id: session.user.id,
+          text: content.trim(),
+          media_urls: mediaUrls,
+          grief_types: ['other'],
+          is_anonymous: false,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      // Refetch all posts to include the new one (simplest & reliable)
+      await fetchPosts();
+
+      setContent('');
+      setMediaFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      console.error('Post submit error:', err);
+      alert('Failed to create post.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setMediaFiles(files.slice(0, 4));
+  };
+
+  const removeMedia = () => {
+    setMediaFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#f9fafb',
-        paddingTop: '4rem',
-        
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div style={{
-          textAlign: 'center',
-          padding: '2rem',
-          backgroundColor: 'white',
-          borderRadius: '1.5rem',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
-        }}>
-          <Phone size={48} style={{ color: '#3b82f6', margin: '0 auto 1rem' }} />
-          <p style={{ color: '#6b7280', fontSize: '1.125rem' }}>Loading call history...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#f9fafb',
-        paddingTop: '4rem',
-        padding: '1rem',
-        textAlign: 'center'
-      }}>
-        <AlertTriangle size={48} style={{ color: '#ef4444', margin: '0 auto 1.5rem' }} />
-        <h2 style={{ 
-          fontSize: '1.875rem',
-          fontWeight: '600',
-          color: '#1f2937',
-          marginBottom: '0.5rem'
-        }}>Error Loading History</h2>
-        <p style={{ 
-          color: '#6b7280',
-          maxWidth: '42rem',
-          margin: '0 auto 1.5rem'
-        }}>{error}</p>
-        <button
-          onClick={() => router.refresh()}
-          style={{
-            marginTop: '1rem',
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#2563eb',
-            color: 'white',
-            border: 'none',
-            borderRadius: '0.75rem',
-            cursor: 'pointer',
-            fontSize: '0.875rem',
-            transition: 'background-color 0.2s'
-          }}
-          onMouseOver={e => e.currentTarget.style.backgroundColor = '#1d4ed8'}
-          onMouseOut={e => e.currentTarget.style.backgroundColor = '#2563eb'}
-        >
-          Retry
-        </button>
-      </div>
-    );
+    return <div className="p-6">Loading posts...</div>;
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      backgroundColor: '#f9fafb',
-      paddingTop: '4rem',
-      paddingBottom: '2rem',
-      padding: '1rem'
-    }}>
-      <div style={{ maxWidth: '42rem', margin: '0 auto' }}>
-        <h1 style={{ 
-          fontSize: '1.875rem',
-          fontWeight: '700',
-          color: '#111827',
-          textAlign: 'center',
-          marginBottom: '1.5rem'
-        }}>Call History</h1>
+    <div className="max-w-2xl mx-auto p-4 space-y-6">
+      <h1 className="text-2xl font-bold">Real Posts Test</h1>
 
-        {calls.length === 0 ? (
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '1.5rem',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-            padding: '2.5rem',
-            textAlign: 'center'
-          }}>
-            <Phone size={40} style={{ color: '#9ca3af', margin: '0 auto 1rem' }} />
-            <p style={{ color: '#6b7280', fontSize: '1.125rem', marginBottom: '0.75rem' }}>
-              No calls in your history yet
+      {/* Composer */}
+      <form onSubmit={handleSubmit} className="border rounded-xl p-4 space-y-3">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="Write a post..."
+          className="w-full min-h-[100px] p-3 border rounded-lg"
+        />
+        {mediaFiles.length > 0 && (
+          <div>
+            <p className="text-sm text-gray-600">
+              {mediaFiles.map((f, i) => f.name).join(', ')}
+              <button type="button" onClick={removeMedia} className="ml-2 text-red-500 underline">
+                Remove
+              </button>
             </p>
-            <Link 
-              href="/connect"
-              style={{
-                color: '#2563eb',
-                textDecoration: 'none',
-                fontSize: '0.875rem',
-                display: 'inline-block',
-                marginTop: '0.5rem'
-              }}
-              onMouseOver={e => e.currentTarget.style.textDecoration = 'underline'}
-              onMouseOut={e => e.currentTarget.style.textDecoration = 'none'}
-            >
-              Start a new conversation
-            </Link>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {calls.map((call) => (
-              <div 
-                key={call.id}
-                style={{
-                  backgroundColor: 'white',
-                  borderRadius: '1.5rem',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                  padding: '1.25rem',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '1rem',
-                  position: 'relative'
-                }}
-              >
-                <div style={{ marginTop: '0.25rem' }}>
-                  {call.type === 'group' ? (
-                    <div style={{
-                      width: '2.5rem',
-                      height: '2.5rem',
-                      borderRadius: '9999px',
-                      backgroundColor: '#f3e8ff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      <Users size={20} style={{ color: '#7e22ce' }} />
-                    </div>
-                  ) : (
-                    <div style={{
-                      width: '2.5rem',
-                      height: '2.5rem',
-                      borderRadius: '9999px',
-                      overflow: 'hidden',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      {call.otherParticipant?.avatar_url ? (
-                        <img 
-                          src={call.otherParticipant.avatar_url} 
-                          alt="Avatar" 
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover'
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          width: '100%',
-                          height: '100%',
-                          backgroundColor: '#dbeafe',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}>
-                          <User size={20} style={{ color: '#2563eb' }} />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <h3 style={{ 
-                    fontWeight: '600', 
-                    color: '#111827', 
-                    fontSize: '1.125rem',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {call.type === 'group'
-                      ? 'Group Session'
-                      : call.otherParticipant?.name || 'Private Session'}
-                  </h3>
-                  <p style={{ 
-                    color: '#6b7280', 
-                    fontSize: '0.875rem',
-                    marginTop: '0.25rem'
-                  }}>
-                    {formatDate(call.started_at)}
-                  </p>
-                </div>
-                
-                <div style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  alignItems: 'flex-end',
-                  gap: '0.5rem'
-                }}>
-                  <button
-  onClick={() => handleReCall(call)}
-  style={{
-    padding: '0.375rem 0.75rem',
-    backgroundColor: '#3b82f6',
-    color: 'white',
-    border: 'none',
-    borderRadius: '9999px',
-    fontSize: '0.75rem',
-    fontWeight: '500',
-    cursor: 'pointer',
-  }}
-  onMouseOver={e => e.currentTarget.style.backgroundColor = '#2563eb'}
-  onMouseOut={e => e.currentTarget.style.backgroundColor = '#3b82f6'}
->
-  📞 Call
-</button>
-                  <div style={{ position: 'relative' }}>
-                    <button
-                      onClick={() => setOpenMenuId(openMenuId === call.id ? null : call.id)}
-                      style={{
-                        width: '2rem',
-                        height: '2rem',
-                        borderRadius: '0.5rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: '#f3f4f6',
-                        border: 'none',
-                        cursor: 'pointer'
-                      }}
-                      aria-label="Call options"
-                    >
-                      <MoreVertical size={18} style={{ color: '#4b5563' }} />
-                    </button>
-                    
-                    {openMenuId === call.id && (
-                      <div style={{
-                        position: 'absolute',
-                        right: 0,
-                        top: '2.5rem',
-                        width: '12rem',
-                        backgroundColor: 'white',
-                        borderRadius: '0.75rem',
-                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-                        border: '1px solid #e5e7eb',
-                        zIndex: 50,
-                        padding: '0.25rem'
-                      }}>
-                        <button
-                          onClick={() => handleReport(call.id)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.5rem 0.75rem',
-                            borderRadius: '0.5rem',
-                            width: '100%',
-                            textAlign: 'left',
-                            border: 'none',
-                            backgroundColor: 'transparent',
-                            cursor: 'pointer'
-                          }}
-                          onMouseOver={e => e.currentTarget.style.backgroundColor = '#f9fafb'}
-                          onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                        >
-                          <AlertTriangle size={16} style={{ color: '#ef4444' }} />
-                          <span style={{ color: '#111827', fontSize: '0.875rem' }}>Report</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
         )}
+        <div className="flex items-center gap-3">
+          <label className="px-3 py-2 bg-gray-100 rounded cursor-pointer text-sm">
+            <Camera size={14} className="inline mr-1" />
+            Add Media
+            <input
+              type="file"
+              multiple
+              accept="image/*,video/*"
+              onChange={handleFileChange}
+              ref={fileInputRef}
+              className="hidden"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={submitting}
+            className={`px-4 py-2 rounded font-medium ${
+              submitting ? 'bg-gray-400' : 'bg-orange-500 hover:bg-orange-600 text-white'
+            }`}
+          >
+            {submitting ? 'Posting...' : 'Post'}
+          </button>
+        </div>
+      </form>
+
+      {/* Feed */}
+      <div className="space-y-6">
+        {displayPosts.length === 0 ? (
+          <p>No posts yet.</p>
+        ) : (
+          displayPosts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              context="feed"
+              showAuthor={true}
+              canDelete={false}
+            />
+          ))
+        )}
       </div>
-      {reportTarget && currentUserId && (
-  <ReportModal
-    isOpen={true}
-    onClose={() => setReportTarget(null)}
-    targetId={reportTarget.id}
-    targetType="call"
-    currentUserId={currentUserId}
-    // Optional: pass call duration if you track it
-    // For now, we'll omit it or compute it later
-    participants={
-      calls
-        .find(c => c.id === reportTarget.id && c.type === 'group')
-        ? [] // You’d need to fetch group participants separately if needed
-        : calls
-            .filter(c => c.id === reportTarget.id && c.type === 'one-on-one')
-            .map(c => ({
-              id: c.otherParticipant!.id,
-              name: c.otherParticipant!.name,
-            }))
-    }
-  />
-)}
     </div>
-    
   );
 }

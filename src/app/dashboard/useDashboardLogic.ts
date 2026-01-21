@@ -249,27 +249,34 @@ setOtherLossText(data.other_loss_description ?? '');
         return;
       }
 
-  const mapped = data.map((p) => ({
-  id: p.id,
-  userId: p.user_id,
-  text: p.text,
-  mediaUrls: p.media_urls || undefined,
-  griefTypes: p.grief_types as GriefType[],
-  createdAt: new Date(p.created_at),
-  likes: p.likes_count || 0,
-  commentsCount: p.comments_count || 0,
-  isLiked: false, // ✅ safe default — PostCard will sync real value
-  isAnonymous: p.is_anonymous,
-  user: p.profiles ? {
-  id: p.profiles.id,
-  fullName: p.profiles.full_name || null,
-  avatarUrl: p.profiles.avatar_url
-  ? `/api/media/avatars/${p.profiles.avatar_url}`
-  : null,
-  isAnonymous: p.profiles.is_anonymous ?? false,
-} : undefined
-}));
+  const mapped = data.map((p) => {
+  // ✅ Explicitly type media_urls
+  const mediaUrls = (Array.isArray(p.media_urls) ? p.media_urls : []) as string[];
+  const proxiedMediaUrls = mediaUrls.map((path: string) => `/api/media/posts/${path}`);
 
+  const avatarUrl = p.profiles?.is_anonymous 
+    ? null 
+    : p.profiles?.avatar_url || null;
+
+  return {
+    id: p.id,
+    userId: p.user_id,
+    text: p.text,
+    mediaUrls: proxiedMediaUrls, // now safely typed
+    griefTypes: p.grief_types as GriefType[],
+    createdAt: new Date(p.created_at),
+    likes: p.likes_count || 0,
+    commentsCount: p.comments_count || 0,
+    isLiked: false,
+    isAnonymous: p.is_anonymous || p.profiles?.is_anonymous,
+    user: p.profiles ? {
+      id: p.profiles.id,
+      fullName: p.profiles.is_anonymous ? null : p.profiles.full_name,
+      avatarUrl,
+      isAnonymous: p.profiles.is_anonymous ?? false,
+    } : undefined,
+  };
+});
       setPosts(mapped);
     };
 
@@ -440,7 +447,7 @@ setOtherLossText(data.other_loss_description ?? '');
   id: newPostData.id,
   userId: newPostData.user_id,
   text: newPostData.text,
-  mediaUrls: newPostData.media_urls || undefined,
+  mediaUrls: newPostData.media_urls || [], // ← RAW PATHS ONLY
   griefTypes: newPostData.grief_types as GriefType[],
   createdAt: new Date(newPostData.created_at),
   likes: newPostData.likes_count || 0,
@@ -449,12 +456,12 @@ setOtherLossText(data.other_loss_description ?? '');
   isAnonymous: newPostData.is_anonymous,
   user: newPostData.profiles ? {
     id: newPostData.profiles.id,
-    fullName: newPostData.profiles.full_name,
-    avatarUrl: newPostData.profiles.avatar_url
-      ? supabase.storage.from('avatars').getPublicUrl(newPostData.profiles.avatar_url).data.publicUrl
-      : null,
+    fullName: newPostData.profiles.is_anonymous ? null : newPostData.profiles.full_name,
+    avatarUrl: newPostData.profiles.is_anonymous 
+      ? null 
+      : newPostData.profiles.avatar_url, // ← RAW PATH
     isAnonymous: newPostData.profiles.is_anonymous ?? false,
-  } : undefined
+  } : undefined,
 };
       setPosts(prev => [newPost, ...prev]);
 

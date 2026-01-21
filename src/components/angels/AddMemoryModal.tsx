@@ -1,5 +1,4 @@
 'use client';
-
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase';
 
@@ -10,7 +9,6 @@ interface AddMemoryModalProps {
   onMemoryAdded: () => void;
 }
 
-// Use your existing bucket name
 const STORAGE_BUCKET = 'angels-media';
 
 export default function AddMemoryModal({
@@ -42,42 +40,30 @@ export default function AddMemoryModal({
       setError('Please select an image.');
       return;
     }
-
     setUploading(true);
     setError(null);
     setSuccess(false);
-
     try {
       const supabase = createClient();
-
-      // Upload to angels-media bucket under memories/ prefix
       const fileName = `memories/${angelId}/${Date.now()}_${selectedFile.name}`;
       const { error: uploadError } = await supabase.storage
         .from(STORAGE_BUCKET)
         .upload(fileName, selectedFile);
-
       if (uploadError) throw uploadError;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from(STORAGE_BUCKET)
-        .getPublicUrl(fileName);
-
-      // Insert into angel_memories table
+      // ✅ Correct: store only the path (fileName), NOT public URL
       const { error: dbError } = await supabase
         .from('angel_memories')
         .insert({
           angel_id: angelId,
-          profile_id: (await supabase.auth.getUser()).data.user?.id, // optional: store who added it
-          photo_url: fileName,
+          profile_id: (await supabase.auth.getUser()).data.user?.id,
+          photo_url: fileName, // ✅ path only
           caption: caption.trim() || null,
         });
-
       if (dbError) throw dbError;
 
       setSuccess(true);
       onMemoryAdded();
-
       setTimeout(() => {
         onClose();
       }, 1200);
@@ -114,18 +100,14 @@ export default function AddMemoryModal({
           maxWidth: '500px',
           maxHeight: '80vh',
           overflowY: 'auto',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 style={{ margin: '0 0 1.25rem', fontSize: '1.5rem', color: '#1e293b' }}>
           Add a Memory for {angelName}
         </h2>
-
         {success ? (
-          <div style={{ color: '#10b981', textAlign: 'center', padding: '1rem' }}>
-            ✅ Memory added successfully!
-          </div>
+          <div style={{ color: '#10b981', textAlign: 'center', padding: '1rem' }}>✅ Memory added successfully!</div>
         ) : (
           <>
             <div style={{ marginBottom: '1.25rem' }}>
@@ -153,7 +135,6 @@ export default function AddMemoryModal({
                 </p>
               )}
             </div>
-
             <div style={{ marginBottom: '1.5rem' }}>
               <label
                 htmlFor="memory-caption"
@@ -182,13 +163,9 @@ export default function AddMemoryModal({
                 }}
               />
             </div>
-
             {error && (
-              <div style={{ color: '#d32f2f', marginBottom: '1rem', fontSize: '0.9rem' }}>
-                {error}
-              </div>
+              <div style={{ color: '#d32f2f', marginBottom: '1rem', fontSize: '0.9rem' }}>{error}</div>
             )}
-
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
               <button
                 onClick={onClose}

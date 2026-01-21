@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Whitelist allowed buckets for security
-const ALLOWED_BUCKETS = ['communities', 'angels-media', 'avatars', 'resources', 'message-files', 'media-files', 'community-files',  'book-covers', 'videos', 'posts',];
+const ALLOWED_BUCKETS = ['communities', 'angels-media', 'avatars', 'resources', 'message-files', 'media-files', 'community-files',  'book-covers', 'videos', 'posts','angels',];
 
 export async function GET(
   request: NextRequest,
