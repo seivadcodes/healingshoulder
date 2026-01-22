@@ -21,7 +21,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import SuggestionModal from '@/components/modals/SuggestionModal';
-import NotificationModal from '@/components/modals/NotificationModal'; // ✅ Ensure imported
+import NotificationModal from '@/components/notifications/NotificationModal'; // ✅ Ensure imported
 
 type CallInvitation = {
   caller_id: string;
