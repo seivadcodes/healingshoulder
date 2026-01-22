@@ -1049,7 +1049,7 @@ avatar_url
         timestamp: now
       });
 
-      toast.success('Message sent!');
+      
     } catch (err) {
       console.error('Send failed:', err);
       // Queue failed message
@@ -1509,34 +1509,35 @@ avatar_url
             ←
           </button>
 
-          {selectedConversation.other_user_avatar_url ? (
-            <Image
-              src={selectedConversation.other_user_avatar_url}
-              alt=""
-              width={40}
-              height={40}
-              style={{
-                borderRadius: '50%',
-                objectFit: 'cover',
-                border: '2px solid #e2e8f0'
-              }}
-            />
-          ) : (
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              backgroundColor: '#e0e7ff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: '600',
-              fontSize: '16px',
-              color: '#4f46e5'
-            }}>
-              {getInitials(selectedConversation.other_user_full_name)}
-            </div>
-          )}
+         {selectedConversation.other_user_avatar_url ? (
+  <Image
+    src={`/api/media/avatars/${selectedConversation.other_user_avatar_url}`}
+    alt=""
+    width={40}
+    height={40}
+    style={{
+      borderRadius: '50%',
+      objectFit: 'cover',
+      border: '2px solid #e2e8f0'
+    }}
+    onError={(e) => (e.currentTarget.style.display = 'none')}
+  />
+) : (
+  <div style={{
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    backgroundColor: '#e0e7ff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: '16px',
+    color: '#4f46e5'
+  }}>
+    {getInitials(selectedConversation.other_user_full_name)}
+  </div>
+)}
 
           <div style={{ flex: 1 }}>
             <h3 style={{
@@ -2590,33 +2591,34 @@ avatar_url
                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = selectedConversation?.id === conv.id ? '#f0f4ff' : 'transparent'}
                   >
                     {conv.other_user_avatar_url ? (
-                      <Image
-                        src={conv.other_user_avatar_url}
-                        alt=""
-                        width={isMobileView ? 44 : 50}
-                        height={isMobileView ? 44 : 50}
-                        style={{
-                          borderRadius: '50%',
-                          objectFit: 'cover',
-                          border: '2px solid #e2e8f0'
-                        }}
-                      />
-                    ) : (
-                      <div style={{
-                        width: isMobileView ? '44px' : '50px',
-                        height: isMobileView ? '44px' : '50px',
-                        borderRadius: '50%',
-                        backgroundColor: '#e0e7ff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: '600',
-                        fontSize: isMobileView ? '16px' : '18px',
-                        color: '#4f46e5'
-                      }}>
-                        {getInitials(conv.other_user_full_name)}
-                      </div>
-                    )}
+  <Image
+    src={`/api/media/avatars/${conv.other_user_avatar_url}`}
+    alt=""
+    width={isMobileView ? 44 : 50}
+    height={isMobileView ? 44 : 50}
+    style={{
+      borderRadius: '50%',
+      objectFit: 'cover',
+      border: '2px solid #e2e8f0'
+    }}
+    onError={(e) => (e.currentTarget.style.display = 'none')}
+  />
+) : (
+  <div style={{
+    width: isMobileView ? '44px' : '50px',
+    height: isMobileView ? '44px' : '50px',
+    borderRadius: '50%',
+    backgroundColor: '#e0e7ff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: isMobileView ? '16px' : '18px',
+    color: '#4f46e5'
+  }}>
+    {getInitials(conv.other_user_full_name)}
+  </div>
+)}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: isMobileView ? '15px' : '16px',
@@ -2781,33 +2783,34 @@ avatar_url
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                       {selectedConversation.other_user_avatar_url ? (
-                        <Image
-                          src={selectedConversation.other_user_avatar_url}
-                          alt=""
-                          width={48}
-                          height={48}
-                          style={{
-                            borderRadius: '50%',
-                            objectFit: 'cover',
-                            border: '2px solid #e2e8f0'
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          width: '48px',
-                          height: '48px',
-                          borderRadius: '50%',
-                          backgroundColor: '#e0e7ff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: '600',
-                          fontSize: '18px',
-                          color: '#4f46e5'
-                        }}>
-                          {getInitials(selectedConversation.other_user_full_name)}
-                        </div>
-                      )}
+  <Image
+    src={`/api/media/avatars/${selectedConversation.other_user_avatar_url}`}
+    alt=""
+    width={48}
+    height={48}
+    style={{
+      borderRadius: '50%',
+      objectFit: 'cover',
+      border: '2px solid #e2e8f0'
+    }}
+    onError={(e) => (e.currentTarget.style.display = 'none')}
+  />
+) : (
+  <div style={{
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    backgroundColor: '#e0e7ff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: '18px',
+    color: '#4f46e5'
+  }}>
+    {getInitials(selectedConversation.other_user_full_name)}
+  </div>
+)}
                       <div style={{ flex: 1 }}>
                         <h3 style={{
                           fontSize: '18px',
