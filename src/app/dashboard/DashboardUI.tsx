@@ -25,6 +25,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { CommentsSection } from '@/components/CommentsSection';
 import { PostCard } from '@/components/PostCard';
+import { PostComposer } from '@/components/PostComposer';
 
 const griefTypeLabels: Record<GriefType, string> = {
   parent: 'Loss of a Parent',
@@ -83,19 +84,13 @@ export function DashboardUI({
   showGriefSetup,
   showSettings,
   selectedGriefTypes,
-  newPostText,
-  mediaFiles,
-  mediaPreviews,
   posts,
   onlineCount,
   isLoading,
   isSubmitting,
   error,
-  fileInputRef,
   toggleGriefType,
   handleSaveGriefTypes,
-  handleFileChange,
-  removeMedia,
   handlePostSubmit,
   toggleAcceptsCalls,
   toggleAcceptsVideoCalls,
@@ -104,7 +99,6 @@ export function DashboardUI({
   updateAvatar,
   setShowSettings,
   setShowGriefSetup,
-  setNewPostText,
   onConnectClick,
   onCommunitiesClick,
   aboutText,
@@ -116,7 +110,6 @@ export function DashboardUI({
   saveAbout,
   otherLossText,
   setOtherLossText,
-
 }: DashboardUIProps) {
   if (isLoading) {
     return (
@@ -220,18 +213,13 @@ export function DashboardUI({
 
         <CommunityPresence onlineCount={onlineCount} />
 
-        <NewPostForm
-          profile={profile}
-          mediaFiles={mediaFiles}
-          newPostText={newPostText}
-          mediaPreviews={mediaPreviews}
-          isSubmitting={isSubmitting}
-          fileInputRef={fileInputRef}
-          setNewPostText={setNewPostText}
-          handleFileChange={handleFileChange}
-          removeMedia={removeMedia}
-          handlePostSubmit={handlePostSubmit}
-        />
+        <PostComposer
+  onSubmit={handlePostSubmit}
+  isSubmitting={isSubmitting}
+  placeholder="What's in your heart today? It's safe to share here..."
+  maxFiles={4}
+  defaultIsAnonymous={preferences.isAnonymous}
+/>
 
         <PostsSection 
   posts={posts} 

@@ -365,23 +365,19 @@ export default function CommunityDetailPage() {
         setCommunity(communityWithPhoto);
 
         // 6. Format members for UI
-        const formattedMembers = membersData.map((member: CommunityMemberWithProfile) => {
-          const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
-          const isAnonymous = profile?.is_anonymous || false;
-
-          // ✅ Correctly assign avatarUrl only if not anonymous and avatar exists
-          const avatarUrl = !isAnonymous && profile?.avatar_url ? profile.avatar_url : null;
-
-          return {
-            user_id: member.user_id,
-            username: isAnonymous ? 'Anonymous' : profile?.full_name || 'Anonymous',
-            avatar_url: avatarUrl, // ✅ Now contains the actual storage path (e.g., "avatars/xyz.jpg") or null
-            last_online: profile?.last_online || null,
-            is_online: isUserOnline(profile?.last_online || null),
-            role: member.role,
-            joined_at: member.joined_at,
-          };
-        });
+       const formattedMembers = membersData.map((member: CommunityMemberWithProfile) => {
+  const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
+  // ✅ NEVER anonymize in the members list — show real names & avatars
+  return {
+    user_id: member.user_id,
+    username: profile?.full_name || 'Anonymous',
+    avatar_url: profile?.avatar_url || null,
+    last_online: profile?.last_online || null,
+    is_online: isUserOnline(profile?.last_online || null),
+    role: member.role,
+    joined_at: member.joined_at,
+  };
+});
 
         setMembers(formattedMembers);
 
@@ -583,18 +579,17 @@ export default function CommunityDetailPage() {
       }
 
       const formattedMembers = membersData.map((member) => {
-        const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
-        const isAnonymous = profile?.is_anonymous || false;
-        return {
-          user_id: member.user_id,
-          username: isAnonymous ? 'Anonymous' : profile?.full_name || 'Anonymous',
-          avatar_url: isAnonymous ? null : profile?.avatar_url || null,
-          last_online: profile?.last_online || null,
-          is_online: isUserOnline(profile?.last_online || null),
-          role: member.role,
-          joined_at: member.joined_at,
-        };
-      });
+  const profile = Array.isArray(member.user) ? member.user[0] ?? null : member.user;
+  return {
+    user_id: member.user_id,
+    username: profile?.full_name || 'Anonymous',
+    avatar_url: profile?.avatar_url || null,
+    last_online: profile?.last_online || null,
+    is_online: isUserOnline(profile?.last_online || null),
+    role: member.role,
+    joined_at: member.joined_at,
+  };
+});
       setMembers(formattedMembers);
 
       // 2. Fetch online count from view
