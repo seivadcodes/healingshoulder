@@ -1,4 +1,4 @@
-﻿// src/components/layout/Header.tsx
+// src/components/layout/Header.tsx
 'use client';
 
 import Link from 'next/link';
@@ -21,6 +21,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import SuggestionModal from '@/components/modals/SuggestionModal';
+import NotificationModal from '@/components/notifications/NotificationModal'; // ✅ Ensure imported
 
 type CallInvitation = {
   caller_id: string;
@@ -40,9 +41,9 @@ export default function Header() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [isUnreadLoading, setIsUnreadLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false); // ✅ Controls modal visibility
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false);
-const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
+  const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const hamburgerMenuRef = useRef<HTMLDivElement>(null);
@@ -51,33 +52,32 @@ const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   // Fetch profile
   useEffect(() => {
     const fetchProfile = async () => {
-  if (!user) {
-    setProfile(null);
-    setProfileLoading(false);
-    return;
-  }
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('full_name, avatar_url')
-    .eq('id', user.id)
-    .maybeSingle();
+      if (!user) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
 
-  if (error) {
-    console.error('Failed to load profile in header:', error);
-    setProfile(null);
-  } else {
-    // ✅ Convert storage path to public URL
-    const avatarUrl = data?.avatar_url
-  ? `/api/media/avatars/${data.avatar_url}`
-  : undefined;
+      if (error) {
+        console.error('Failed to load profile in header:', error);
+        setProfile(null);
+      } else {
+        const avatarUrl = data?.avatar_url
+          ? `/api/media/avatars/${data.avatar_url}`
+          : undefined;
 
-    setProfile({
-      full_name: data?.full_name,
-      avatar_url: avatarUrl, // ✅ now a real URL or undefined
-    });
-  }
-  setProfileLoading(false);
-};
+        setProfile({
+          full_name: data?.full_name,
+          avatar_url: avatarUrl,
+        });
+      }
+      setProfileLoading(false);
+    };
     fetchProfile();
   }, [user, supabase]);
 
@@ -337,7 +337,7 @@ const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
             <Menu size={24} color="white" />
           </button>
 
-          {/* App title (non-clickable or minimal link) */}
+          {/* App title */}
           <span
             style={{
               fontWeight: 400,
@@ -394,7 +394,7 @@ const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
                 )}
               </Link>
 
-              {/* Notifications */}
+              {/* Notifications — opens modal */}
               <button
                 onClick={() => setIsNotificationModalOpen(true)}
                 style={{
@@ -539,29 +539,29 @@ const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
                       Dashboard
                     </Link>
                     <button
-  onClick={() => {
-    setIsMenuOpen(false);
-    setIsSuggestionModalOpen(true);
-  }}
-  style={{
-    width: '100%',
-    textAlign: 'left',
-    padding: '0.5rem 1rem',
-    fontSize: '0.875rem',
-    color: '#3f3f46',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-  }}
-  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')}
-  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
->
-  <MessageSquare size={16} />
-  Send Feedback
-</button>
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        setIsSuggestionModalOpen(true);
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.875rem',
+                        color: '#3f3f46',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f4f4f5')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <MessageSquare size={16} />
+                      Send Feedback
+                    </button>
                     <button
                       onClick={handleLogout}
                       style={{
@@ -701,7 +701,7 @@ const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
         ></div>
       )}
 
-      {/* Hamburger Navigation Menu — now always available */}
+      {/* Hamburger Navigation Menu */}
       {isHamburgerMenuOpen && (
         <>
           <div
@@ -760,12 +760,22 @@ const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
           </div>
         </>
       )}
-{isSuggestionModalOpen && (
-  <SuggestionModal
-    isOpen={true}
-    onClose={() => setIsSuggestionModalOpen(false)}
-  />
-)}
+
+      {/* ✅ Render NotificationModal when open */}
+      {isNotificationModalOpen && (
+        <NotificationModal
+          isOpen={isNotificationModalOpen}
+          onClose={() => setIsNotificationModalOpen(false)}
+        />
+      )}
+
+      {/* Suggestion Modal */}
+      {isSuggestionModalOpen && (
+        <SuggestionModal
+          isOpen={true}
+          onClose={() => setIsSuggestionModalOpen(false)}
+        />
+      )}
     </>
   );
 }

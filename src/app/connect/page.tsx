@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
@@ -718,8 +718,15 @@ const acceptGroup = async (requestId: string) => {
               <div>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <div style={styles.userAvatar}>
-                    {user?.avatar_url ? (
-                      <Image src={user.avatar_url} alt={user.full_name} width={48} height={48} className="rounded-full" />
+                   {user?.avatar_url ? (
+  <Image
+    src={`/api/media/avatars/${user.avatar_url}`}
+    alt={user.full_name}
+    width={48}
+    height={48}
+    className="rounded-full"
+    onError={(e) => (e.currentTarget.style.display = 'none')}
+  />
                     ) : (
                       <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
                         {user?.full_name?.charAt(0) || '👤'}
@@ -877,7 +884,7 @@ const acceptGroup = async (requestId: string) => {
         {/* Available Requests */}
         <div style={{ ...styles.card, ...styles.sectionGap, padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '1.25rem', borderBottom: '1px solid #f4f4f5', background: '#fafafa' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917' }}>Available Connections</h2>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917' }}>Available Requests</h2>
             <p style={{ color: '#78716c', marginTop: '0.25rem' }}>
               {allRequests.length > 0
                 ? 'Join a one-on-one chat or a group call'
@@ -922,7 +929,14 @@ const acceptGroup = async (requestId: string) => {
       flexShrink: 0,
     }}>
       {request.user?.avatar_url ? (
-        <Image src={request.user.avatar_url} alt={request.user.full_name} width={48} height={48} className="rounded-full" />
+  <Image
+    src={`/api/media/avatars/${request.user.avatar_url}`}
+    alt={request.user.full_name}
+    width={48}
+    height={48}
+    className="rounded-full"
+    onError={(e) => (e.currentTarget.style.display = 'none')}
+  />
       ) : (
         <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
           {request.user?.full_name?.charAt(0) || '👤'}
