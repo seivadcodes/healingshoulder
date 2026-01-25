@@ -39,7 +39,7 @@ export default function RoomPage() {
 
   const supabase = createClient();
   const broadcastChannelRef = useRef<RealtimeChannel | null>(null);
-
+const [otherParticipantName, setOtherParticipantName] = useState<string | null>(null);
 
    const checkAndStartTimer = useCallback(
   async (roomId: string, roomType: RoomType, userId: string) => {
@@ -174,111 +174,120 @@ export default function RoomPage() {
   }, [callEndedByPeer, router]);
 
   useEffect(() => {
-    const initializeRoom = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          router.push('/auth');
-          return;
-        }
-        const userId = session.user.id;
-        setCurrentUserId(userId);
-
-        let roomType: RoomType | null = null;
-        let hostId: string | null = null;
-        let callStartedAt: Date | null = null;
-
-        // --- Check 1:1 ---
-        const { data: oneOnOne } = await supabase
-          .from('quick_connect_requests')
-          .select('user_id, acceptor_id, status, expires_at, call_started_at')
-          .eq('room_id', roomId)
-          .single();
-
-        if (oneOnOne && oneOnOne.status === 'matched') {
-          if (new Date(oneOnOne.expires_at) > new Date()) {
-            roomType = 'one-on-one';
-            hostId = oneOnOne.user_id;
-            callStartedAt = oneOnOne.call_started_at ? new Date(oneOnOne.call_started_at) : null;
-          }
-        }
-
-        // --- Check group ---
-        if (!roomType) {
-          const { data: group } = await supabase
-            .from('quick_group_requests')
-            .select('user_id, status, expires_at, call_started_at')
-            .eq('room_id', roomId)
-            .single();
-
-          if (group && new Date(group.expires_at) > new Date()) {
-            if (group.status === 'available' || group.status === 'matched') {
-              roomType = 'group';
-              hostId = group.user_id;
-              callStartedAt = group.call_started_at ? new Date(group.call_started_at) : null;
-            }
-          }
-        }
-
-        if (!roomType || !hostId) {
-          throw new Error('Room not found or expired');
-        }
-
-        // Ensure user is still a participant
-        const { data: participant } = await supabase
-          .from('room_participants')
-          .select('user_id')
-          .eq('room_id', roomId)
-          .eq('user_id', userId)
-          .single();
-
-        if (!participant) {
-          throw new Error('You are no longer in this room');
-        }
-
-        // Get user name
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', userId)
-          .single();
-        const userName = profile?.full_name || session.user.email || 'Anonymous';
-
-        // Get token
-        const tokenRes = await fetch('/api/livekit/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ room: roomId, identity: userId, name: userName }),
-        });
-
-        if (!tokenRes.ok) {
-          const errData = await tokenRes.json();
-          throw new Error(errData.error || 'Failed to get LiveKit token');
-        }
-        const { token } = await tokenRes.json();
-
-        setRoomMeta({ 
-          id: roomId, 
-          type: roomType, 
-          hostId, 
-          title: roomType === 'group' ? 'Group Call' : 'Private Call', 
-          callStartedAt 
-        });
-        setToken(token);
-
-        // Start or initialize timer
-        await checkAndStartTimer(roomId, roomType, userId);
-
-      } catch (err) {
-        console.error('[RoomPage] Init error:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setIsLoading(false);
+  const initializeRoom = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/auth');
+        return;
       }
-    };
+      const userId = session.user.id;
+      setCurrentUserId(userId);
 
-    initializeRoom();
-  }, [roomId, router, supabase, checkAndStartTimer]);
+      let roomType: RoomType | null = null;
+      let hostId: string | null = null;
+      let callStartedAt: Date | null = null;
+
+      // --- Check 1:1 ---
+      const { data: oneOnOne } = await supabase
+        .from('quick_connect_requests')
+        .select('user_id, acceptor_id, status, expires_at, call_started_at')
+        .eq('room_id', roomId)
+        .single();
+
+      if (oneOnOne && oneOnOne.status === 'matched') {
+        if (new Date(oneOnOne.expires_at) > new Date()) {
+          roomType = 'one-on-one';
+          hostId = oneOnOne.user_id;
+          callStartedAt = oneOnOne.call_started_at ? new Date(oneOnOne.call_started_at) : null;
+
+          // 👇 FETCH OTHER PARTICIPANT'S NAME FOR 1:1 CALLS
+          const otherUserId = userId === oneOnOne.user_id ? oneOnOne.acceptor_id : oneOnOne.user_id;
+          const { data: otherProfile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', otherUserId)
+            .single();
+          setOtherParticipantName(otherProfile?.full_name || 'Anonymous');
+        }
+      }
+
+      // --- Check group ---
+      if (!roomType) {
+        const { data: group } = await supabase
+          .from('quick_group_requests')
+          .select('user_id, status, expires_at, call_started_at')
+          .eq('room_id', roomId)
+          .single();
+
+        if (group && new Date(group.expires_at) > new Date()) {
+          if (group.status === 'available' || group.status === 'matched') {
+            roomType = 'group';
+            hostId = group.user_id;
+            callStartedAt = group.call_started_at ? new Date(group.call_started_at) : null;
+          }
+        }
+      }
+
+      if (!roomType || !hostId) {
+        throw new Error('Room not found or expired');
+      }
+
+      // Ensure user is still a participant
+      const { data: participant } = await supabase
+        .from('room_participants')
+        .select('user_id')
+        .eq('room_id', roomId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!participant) {
+        throw new Error('You are no longer in this room');
+      }
+
+      // Get user name
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userId)
+        .single();
+      const userName = profile?.full_name || session.user.email || 'Anonymous';
+
+      // Get token
+      const tokenRes = await fetch('/api/livekit/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: roomId, identity: userId, name: userName }),
+      });
+
+      if (!tokenRes.ok) {
+        const errData = await tokenRes.json();
+        throw new Error(errData.error || 'Failed to get LiveKit token');
+      }
+      const { token } = await tokenRes.json();
+
+      setRoomMeta({ 
+        id: roomId, 
+        type: roomType, 
+        hostId, 
+        title: roomType === 'group' ? 'Group Call' : 'Private Call', 
+        callStartedAt 
+      });
+      setToken(token);
+
+      // Start or initialize timer
+      await checkAndStartTimer(roomId, roomType, userId);
+
+    } catch (err) {
+      console.error('[RoomPage] Init error:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  initializeRoom();
+}, [roomId, router, supabase, checkAndStartTimer]);
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -477,17 +486,19 @@ if (roomMeta.type === 'one-on-one') {
             flexDirection: 'column'
           }}
         >
-          {/* Participant View — now safely centered in available space */}
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '3rem',
-            // No need for huge padding — space is already reserved by header/footer
-          }}>
-            <PhoneCallParticipants currentUserId={currentUserId!} />
-          </div>
+         {/* Participant View — now safely centered in available space */}
+<div style={{
+  flex: 1,
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'center',
+  gap: '3rem',
+}}>
+  <PhoneCallParticipants 
+    currentUserId={currentUserId!} 
+    otherParticipantName={otherParticipantName} 
+  />
+</div>
 
           {/* Footer Controls */}
           <div style={{ 
@@ -688,13 +699,20 @@ function MuteButton() {
 }
 
 // Phone call specific participant component (now only shows the other participant)
-function PhoneCallParticipants({ currentUserId }: { currentUserId: string }) {
+// Phone call specific participant component (now only shows the other participant)
+function PhoneCallParticipants({ 
+  currentUserId, 
+  otherParticipantName 
+}: { 
+  currentUserId: string; 
+  otherParticipantName: string | null; 
+}) {
   const participants = useParticipants();
 
   if (participants.length < 2) {
     return (
       <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: '1.125rem' }}>
-        Waiting for the other participant to join...
+        Waiting for {otherParticipantName || 'the other participant'} to join...
       </div>
     );
   }
