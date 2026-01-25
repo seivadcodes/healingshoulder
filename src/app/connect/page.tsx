@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { Phone, MessageCircle, Clock, Users } from 'lucide-react';
 import Image from 'next/image';
@@ -22,7 +22,6 @@ interface OneOnOneRequest {
   acceptor_id?: string;
   user?: UserProfile;
   context?: string | null;
-
 }
 
 interface GroupRequest {
@@ -34,7 +33,6 @@ interface GroupRequest {
   room_id?: string;
   user?: UserProfile;
   context?: string | null;
-
 }
 
 interface AvailableRequest extends OneOnOneRequest, GroupRequest {
@@ -134,6 +132,12 @@ const styles = {
     marginTop: '0.25rem',
     flexShrink: 0 as const,
   },
+  highlightedRequest: {
+    border: '2px solid #fbbf24',
+    boxShadow: '0 0 0 3px rgba(251, 191, 36, 0.3)',
+    transform: 'scale(1.02)',
+    transition: 'all 0.3s ease',
+  },
 };
 
 export default function ConnectPage() {
@@ -145,15 +149,18 @@ export default function ConnectPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
   const [isPostingOneOnOne, setIsPostingOneOnOne] = useState(false);
   const [isPostingGroup, setIsPostingGroup] = useState(false);
   const isRedirectingRef = useRef(false);
- const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
- 
-
+  const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
   const [showContextModal, setShowContextModal] = useState<'one-on-one' | 'group' | null>(null);
   const [tempContext, setTempContext] = useState('');
+
+  // Refs for scrolling
+  const availableRequestsSectionRef = useRef<HTMLDivElement>(null);
+  const requestRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const fetchActiveOneOnOne = useCallback(async (userId: string) => {
     try {
@@ -230,7 +237,7 @@ export default function ConnectPage() {
     try {
       const { data: requests, error: reqError } = await supabase
         .from('quick_connect_requests')
-        .select('id, created_at, user_id, status, expires_at, context') // ✅ added context
+        .select('id, created_at, user_id, status, expires_at, context')
         .eq('status', 'available')
         .neq('user_id', currentUserId)
         .gt('expires_at', new Date().toISOString())
@@ -249,16 +256,13 @@ export default function ConnectPage() {
         .select('id, full_name, avatar_url')
         .in('id', userIds);
 
-      const profileMap = new Map(
-        (profiles || []).map((p) => [p.id, p])
-      );
+      const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
 
-      const formatted = requests
-        .map((req) => ({
-          ...req,
-          type: 'one-on-one' as const,
-          user: profileMap.get(req.user_id) || { id: req.user_id, full_name: 'Anonymous', avatar_url: null },
-        })) as AvailableRequest[];
+      const formatted = requests.map((req) => ({
+        ...req,
+        type: 'one-on-one' as const,
+        user: profileMap.get(req.user_id) || { id: req.user_id, full_name: 'Anonymous', avatar_url: null },
+      })) as AvailableRequest[];
 
       setAvailableOneOnOne(formatted);
     } catch (err) {
@@ -276,7 +280,7 @@ export default function ConnectPage() {
     try {
       const { data: requests, error: reqError } = await supabase
         .from('quick_group_requests')
-        .select('id, created_at, user_id, status, expires_at, context') // ✅ added context
+        .select('id, created_at, user_id, status, expires_at, context')
         .eq('status', 'available')
         .neq('user_id', currentUserId)
         .gt('expires_at', new Date().toISOString())
@@ -295,16 +299,13 @@ export default function ConnectPage() {
         .select('id, full_name, avatar_url')
         .in('id', userIds);
 
-      const profileMap = new Map(
-        (profiles || []).map((p) => [p.id, p])
-      );
+      const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
 
-      const formatted = requests
-        .map((req) => ({
-          ...req,
-          type: 'group' as const,
-          user: profileMap.get(req.user_id) || { id: req.user_id, full_name: 'Anonymous', avatar_url: null },
-        })) as AvailableRequest[];
+      const formatted = requests.map((req) => ({
+        ...req,
+        type: 'group' as const,
+        user: profileMap.get(req.user_id) || { id: req.user_id, full_name: 'Anonymous', avatar_url: null },
+      })) as AvailableRequest[];
 
       setAvailableGroups(formatted);
     } catch (err) {
@@ -341,7 +342,7 @@ export default function ConnectPage() {
         }
       };
       pollInterval = setInterval(poll, 8000);
-      poll(); // initial call
+      poll();
     };
 
     const initialize = async () => {
@@ -352,10 +353,9 @@ export default function ConnectPage() {
           return;
         }
 
-        // 🔧 Fix: remove space in 'full_name'
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('id, full_name, avatar_url, accepts_calls') // ✅ corrected
+          .select('id, full_name, avatar_url, accepts_calls')
           .eq('id', session.user.id)
           .single();
 
@@ -385,272 +385,295 @@ export default function ConnectPage() {
     fetchAvailableOneOnOne,
     fetchAvailableGroups,
     router,
-    supabase
+    supabase,
   ]);
+
+  // Scroll & highlight logic
+  useEffect(() => {
+    const allRequests = [...availableOneOnOne, ...availableGroups];
+    const requestId = searchParams.get('requestId');
+
+    if (allRequests.length > 0) {
+      if (requestId && requestRefs.current[requestId]) {
+        const targetElement = requestRefs.current[requestId];
+        if (targetElement) {
+          // Apply temporary highlight
+          targetElement.style.border = '2px solid #fbbf24';
+          targetElement.style.boxShadow = '0 0 0 3px rgba(251, 191, 36, 0.3)';
+          targetElement.style.transform = 'scale(1.02)';
+          setTimeout(() => {
+            if (targetElement) {
+              targetElement.style.border = '';
+              targetElement.style.boxShadow = '';
+              targetElement.style.transform = '';
+            }
+          }, 3000);
+
+          // Smooth scroll to element
+          targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+      }
+
+      // Otherwise scroll to section
+      if (availableRequestsSectionRef.current) {
+        availableRequestsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [availableOneOnOne, availableGroups, searchParams]);
 
   // === ONE-ON-ONE LOGIC ===
   const postOneOnOneWithContext = async (context: string) => {
-  if (!user || activeOneOnOne || activeGroup || isPostingOneOnOne || isRedirectingRef.current) return;
-  setIsPostingOneOnOne(true);
-  setError(null);
+    if (!user || activeOneOnOne || activeGroup || isPostingOneOnOne || isRedirectingRef.current) return;
+    setIsPostingOneOnOne(true);
+    setError(null);
 
-  try {
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    const { data, error } = await supabase
-      .from('quick_connect_requests')
-      .insert({
-        user_id: user.id,
-        status: 'available',
-        expires_at: expiresAt,
-        context: context.trim() || null,
-      })
-      .select()
-      .single();
+    try {
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from('quick_connect_requests')
+        .insert({
+          user_id: user.id,
+          status: 'available',
+          expires_at: expiresAt,
+          context: context.trim() || null,
+        })
+        .select()
+        .single();
 
-    if (error) throw error;
+      if (error) throw error;
 
-    // ✅ Create targeted notifications for other users
-    const { error: notifyError } = await supabase.rpc('create_targeted_notifications', {
-      req_type: 'one_on_one',
-      req_id: data.id,
-    });
-
-    if (notifyError) {
-      console.warn('Non-critical: failed to create notifications:', notifyError.message);
-      // Still proceed — request was created
-    }
-    console.log('Calling create_targeted_notifications with:', {
-  req_type: 'one_on_one',
-  req_id: data.id,
-});
-
-    setActiveOneOnOne({
-      ...data,
-      user: {
-        id: user.id,
-        full_name: user.full_name,
-        avatar_url: user.avatar_url,
-      },
-    });
-  } catch (err) {
-    console.error('Failed to post 1:1 request:', err);
-    setError('Failed to create one-on-one request.');
-  } finally {
-    setIsPostingOneOnOne(false);
-  }
-};
-
-  const postGroupWithContext = async (context: string) => {
-  if (!user || activeOneOnOne || activeGroup || isPostingGroup || isRedirectingRef.current) return;
-  setIsPostingGroup(true);
-  setError(null);
-
-  try {
-    const roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
-    const { error: insertErr } = await supabase
-      .from('quick_group_requests')
-      .insert({
-        user_id: user.id,
-        status: 'available',
-        expires_at: expiresAt,
-        room_id: roomId,
-        context: context.trim() || null,
-      });
-
-    if (insertErr) throw insertErr;
-
-    const { error: participantErr } = await supabase
-      .from('room_participants')
-      .insert({
-        room_id: roomId,
-        user_id: user.id,
-        role: 'host',
-      });
-
-    if (participantErr) throw participantErr;
-
-    // ✅ Create targeted notifications for other users
-    // First, get the request ID (since we didn't select it above)
-    const { data: reqData, error: fetchErr } = await supabase
-      .from('quick_group_requests')
-      .select('id')
-      .eq('room_id', roomId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!fetchErr && reqData?.id) {
       const { error: notifyError } = await supabase.rpc('create_targeted_notifications', {
-        req_type: 'group',
-        req_id: reqData.id,
+        req_type: 'one_on_one',
+        req_id: data.id,
       });
 
       if (notifyError) {
-        console.warn('Non-critical: failed to create group notifications:', notifyError.message);
+        console.warn('Non-critical: failed to create notifications:', notifyError.message);
       }
-    }
 
-    isRedirectingRef.current = true;
-    router.push(`/room/${roomId}`);
-  } catch (err) {
-    console.error('Failed to post group request:', err);
-    setError('Failed to create group call request.');
-  } finally {
-    setIsPostingGroup(false);
-  }
-};
+      setActiveOneOnOne({
+        ...data,
+        user: {
+          id: user.id,
+          full_name: user.full_name,
+          avatar_url: user.avatar_url,
+        },
+      });
+    } catch (err) {
+      console.error('Failed to post 1:1 request:', err);
+      setError('Failed to create one-on-one request.');
+    } finally {
+      setIsPostingOneOnOne(false);
+    }
+  };
+
+  const postGroupWithContext = async (context: string) => {
+    if (!user || activeOneOnOne || activeGroup || isPostingGroup || isRedirectingRef.current) return;
+    setIsPostingGroup(true);
+    setError(null);
+
+    try {
+      const roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+      const { error: insertErr } = await supabase
+        .from('quick_group_requests')
+        .insert({
+          user_id: user.id,
+          status: 'available',
+          expires_at: expiresAt,
+          room_id: roomId,
+          context: context.trim() || null,
+        });
+
+      if (insertErr) throw insertErr;
+
+      const { error: participantErr } = await supabase
+        .from('room_participants')
+        .insert({
+          room_id: roomId,
+          user_id: user.id,
+          role: 'host',
+        });
+
+      if (participantErr) throw participantErr;
+
+      const { data: reqData, error: fetchErr } = await supabase
+        .from('quick_group_requests')
+        .select('id')
+        .eq('room_id', roomId)
+        .eq('user_id', user.id)
+        .single();
+
+      if (!fetchErr && reqData?.id) {
+        const { error: notifyError } = await supabase.rpc('create_targeted_notifications', {
+          req_type: 'group',
+          req_id: reqData.id,
+        });
+
+        if (notifyError) {
+          console.warn('Non-critical: failed to create group notifications:', notifyError.message);
+        }
+      }
+
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+    } catch (err) {
+      console.error('Failed to post group request:', err);
+      setError('Failed to create group call request.');
+    } finally {
+      setIsPostingGroup(false);
+    }
+  };
 
   const cancelOneOnOne = async () => {
-  if (!activeOneOnOne || isRedirectingRef.current) return;
-  setActiveOneOnOne(null); // optimistic
+    if (!activeOneOnOne || isRedirectingRef.current) return;
+    setActiveOneOnOne(null);
 
-  try {
-    const { error } = await supabase
-      .from('quick_connect_requests')
-      .update({ status: 'completed' })
-      .eq('id', activeOneOnOne.id)
-      .eq('status', 'available');
+    try {
+      const { error } = await supabase
+        .from('quick_connect_requests')
+        .update({ status: 'completed' })
+        .eq('id', activeOneOnOne.id)
+        .eq('status', 'available');
 
-    // ✅ Delete associated notifications
-    if (!error) {
-      await supabase
-        .from('notifications')
-        .delete()
-        .eq('source_id', activeOneOnOne.id)
-        .eq('type', 'one_on_one_request');
+      if (!error) {
+        await supabase
+          .from('notifications')
+          .delete()
+          .eq('source_id', activeOneOnOne.id)
+          .eq('type', 'one_on_one_request');
+      }
+    } catch (err) {
+      console.error('Cancel 1:1 error:', err);
     }
-  } catch (err) {
-    console.error('Cancel 1:1 error:', err);
-  }
-};
-
-
+  };
 
   const cancelGroup = async () => {
-  if (!activeGroup || isRedirectingRef.current) return;
+    if (!activeGroup || isRedirectingRef.current) return;
 
-  try {
-    const { data, error } = await supabase
-      .from('quick_group_requests')
-      .update({ status: 'completed' })
-      .eq('id', activeGroup.id)
-      .eq('status', 'available')
-      .select();
-
-    if (error) throw error;
-
-    if (data && data.length > 0) {
-      // ✅ Delete notifications
-      await supabase
-        .from('notifications')
-        .delete()
-        .eq('source_id', activeGroup.id)
-        .eq('type', 'group_request');
-    }
-
-    setActiveGroup(null);
-  } catch (err) {
-    console.error('Cancel group error:', err);
-    setError('Failed to cancel group request.');
-  }
-};
-
- const acceptOneOnOne = async (requestId: string) => {
-  if (!user || isRedirectingRef.current || acceptingRequestId) return;
-  
-  setAcceptingRequestId(requestId); // 👈 show loading on this button
-  try {
-    const roomId = `quick-connect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const { data: existing } = await supabase
-      .from('quick_connect_requests')
-      .select('*')
-      .eq('id', requestId)
-      .eq('status', 'available')
-      .gt('expires_at', new Date().toISOString())
-      .single();
-
-    if (!existing) {
-      setError('One-on-one request not found or expired.');
-      setAcceptingRequestId(null);
-      return;
-    }
-
-    const { error: updateErr } = await supabase
-      .from('quick_connect_requests')
-      .update({
-        status: 'matched',
-        room_id: roomId,
-        acceptor_id: user.id,
-      })
-      .eq('id', requestId)
-      .eq('status', 'available');
-
-    if (updateErr) throw updateErr;
-
-    await supabase.from('room_participants').upsert([
-      { room_id: roomId, user_id: existing.user_id, role: 'participant' },
-      { room_id: roomId, user_id: user.id, role: 'participant' }
-    ], { onConflict: 'room_id,user_id' });
-
-    isRedirectingRef.current = true;
-    router.push(`/room/${roomId}`);
-  } catch (err) {
-    console.error('Failed to accept 1:1:', err);
-    setError('Failed to accept one-on-one request.');
-  } finally {
-    setAcceptingRequestId(null); // 👈 reset after success or error
-  }
-};
-
-const acceptGroup = async (requestId: string) => {
-  if (!user || isRedirectingRef.current || acceptingRequestId) return;
-  
-  setAcceptingRequestId(requestId);
-  try {
-    const { data: existing } = await supabase
-      .from('quick_group_requests')
-      .select('user_id, room_id, status')
-      .eq('id', requestId)
-      .eq('status', 'available')
-      .gt('expires_at', new Date().toISOString())
-      .single();
-
-    if (!existing) {
-      setError('Group request not found or expired.');
-      setAcceptingRequestId(null);
-      return;
-    }
-
-    let roomId = existing.room_id;
-    if (!roomId) {
-      roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-      const { error: updateErr } = await supabase
+    try {
+      const { data, error } = await supabase
         .from('quick_group_requests')
-        .update({ status: 'matched', room_id: roomId })
+        .update({ status: 'completed' })
+        .eq('id', activeGroup.id)
+        .eq('status', 'available')
+        .select();
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        await supabase
+          .from('notifications')
+          .delete()
+          .eq('source_id', activeGroup.id)
+          .eq('type', 'group_request');
+      }
+
+      setActiveGroup(null);
+    } catch (err) {
+      console.error('Cancel group error:', err);
+      setError('Failed to cancel group request.');
+    }
+  };
+
+  const acceptOneOnOne = async (requestId: string) => {
+    if (!user || isRedirectingRef.current || acceptingRequestId) return;
+    setAcceptingRequestId(requestId);
+    try {
+      const roomId = `quick-connect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const { data: existing } = await supabase
+        .from('quick_connect_requests')
+        .select('*')
+        .eq('id', requestId)
+        .eq('status', 'available')
+        .gt('expires_at', new Date().toISOString())
+        .single();
+
+      if (!existing) {
+        setError('One-on-one request not found or expired.');
+        setAcceptingRequestId(null);
+        return;
+      }
+
+      const { error: updateErr } = await supabase
+        .from('quick_connect_requests')
+        .update({
+          status: 'matched',
+          room_id: roomId,
+          acceptor_id: user.id,
+        })
         .eq('id', requestId)
         .eq('status', 'available');
+
       if (updateErr) throw updateErr;
+
+      await supabase.from('room_participants').upsert(
+        [
+          { room_id: roomId, user_id: existing.user_id, role: 'participant' },
+          { room_id: roomId, user_id: user.id, role: 'participant' },
+        ],
+        { onConflict: 'room_id,user_id' }
+      );
+
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+    } catch (err) {
+      console.error('Failed to accept 1:1:', err);
+      setError('Failed to accept one-on-one request.');
+    } finally {
+      setAcceptingRequestId(null);
     }
+  };
 
-    await supabase.from('room_participants').upsert(
-      { room_id: roomId, user_id: user.id, role: 'participant' },
-      { onConflict: 'room_id,user_id' }
-    );
-    await supabase.from('room_participants').upsert(
-      { room_id: roomId, user_id: existing.user_id, role: 'host' },
-      { onConflict: 'room_id,user_id' }
-    );
+  const acceptGroup = async (requestId: string) => {
+    if (!user || isRedirectingRef.current || acceptingRequestId) return;
+    setAcceptingRequestId(requestId);
+    try {
+      const { data: existing } = await supabase
+        .from('quick_group_requests')
+        .select('user_id, room_id, status')
+        .eq('id', requestId)
+        .eq('status', 'available')
+        .gt('expires_at', new Date().toISOString())
+        .single();
 
-    isRedirectingRef.current = true;
-    router.push(`/room/${roomId}`);
-  } catch (err) {
-    console.error('Failed to accept group:', err);
-    setError('Failed to join group call.');
-  } finally {
-    setAcceptingRequestId(null);
-  }
-};
+      if (!existing) {
+        setError('Group request not found or expired.');
+        setAcceptingRequestId(null);
+        return;
+      }
+
+      let roomId = existing.room_id;
+      if (!roomId) {
+        roomId = `group-call-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const { error: updateErr } = await supabase
+          .from('quick_group_requests')
+          .update({ status: 'matched', room_id: roomId })
+          .eq('id', requestId)
+          .eq('status', 'available');
+        if (updateErr) throw updateErr;
+      }
+
+      await supabase.from('room_participants').upsert(
+        { room_id: roomId, user_id: user.id, role: 'participant' },
+        { onConflict: 'room_id,user_id' }
+      );
+      await supabase.from('room_participants').upsert(
+        { room_id: roomId, user_id: existing.user_id, role: 'host' },
+        { onConflict: 'room_id,user_id' }
+      );
+
+      isRedirectingRef.current = true;
+      router.push(`/room/${roomId}`);
+    } catch (err) {
+      console.error('Failed to accept group:', err);
+      setError('Failed to join group call.');
+    } finally {
+      setAcceptingRequestId(null);
+    }
+  };
 
   const timeAgo = (timestamp: string) => {
     const now = new Date();
@@ -703,12 +726,9 @@ const acceptGroup = async (requestId: string) => {
       <div style={styles.maxWidth}>
         <div style={styles.header}>
           <div>
-            <h1 style={styles.title}>Connect Now</h1>
-            <p style={styles.subtitle}>
-              Post a one-on-one or group request when you need to talk — or join someone else&#39;s.
-            </p>
-          </div>
-          
+  <h1 style={styles.title}>Connect Now</h1>
+  <p style={styles.subtitle}>Post a one-on-one or group request when you need to talk — or join someone else&#39;s.</p>
+</div>
         </div>
 
         {/* One-on-One Request */}
@@ -718,15 +738,15 @@ const acceptGroup = async (requestId: string) => {
               <div>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <div style={styles.userAvatar}>
-                   {user?.avatar_url ? (
-  <Image
-    src={`/api/media/avatars/${user.avatar_url}`}
-    alt={user.full_name}
-    width={48}
-    height={48}
-    className="rounded-full"
-    onError={(e) => (e.currentTarget.style.display = 'none')}
-  />
+                    {user?.avatar_url ? (
+                      <Image
+                        src={`/api/media/avatars/${user.avatar_url}`}
+                        alt={user.full_name}
+                        width={48}
+                        height={48}
+                        className="rounded-full"
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                      />
                     ) : (
                       <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
                         {user?.full_name?.charAt(0) || '👤'}
@@ -781,22 +801,20 @@ const acceptGroup = async (requestId: string) => {
               Need to Talk 1:1?
             </h2>
             <p style={{ color: '#78716c', marginBottom: '1.5rem', maxWidth: '32rem', margin: '0 auto' }}>
-              Post a request to connect with someone who&#39;s available to listen right now.
-            </p>
-            <>
-              <button
-  onClick={() => setShowContextModal('one-on-one')}
-  disabled={isPostingOneOnOne || !!activeGroup || isRedirectingRef.current}
-  style={{
-    ...styles.button,
-    ...(isPostingOneOnOne || activeGroup || isRedirectingRef.current ? styles.disabledButton : {}),
-    margin: '0 auto',
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-  }}
->
-  <Phone size={20} /> Post 1:1 Request
-</button>
-            </>
+  Post a request to connect with someone who&#39;s available to listen right now.
+</p>
+            <button
+              onClick={() => setShowContextModal('one-on-one')}
+              disabled={isPostingOneOnOne || !!activeGroup || isRedirectingRef.current}
+              style={{
+                ...styles.button,
+                ...(isPostingOneOnOne || activeGroup || isRedirectingRef.current ? styles.disabledButton : {}),
+                margin: '0 auto',
+                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+              }}
+            >
+              <Phone size={20} /> Post 1:1 Request
+            </button>
           </div>
         )}
 
@@ -808,7 +826,14 @@ const acceptGroup = async (requestId: string) => {
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <div style={styles.userAvatar}>
                     {user?.avatar_url ? (
-                      <Image src={user.avatar_url} alt={user.full_name} width={48} height={48} className="rounded-full" />
+                      <Image
+                        src={`/api/media/avatars/${user.avatar_url}`}
+                        alt={user.full_name}
+                        width={48}
+                        height={48}
+                        className="rounded-full"
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                      />
                     ) : (
                       <span style={{ color: '#2563eb', fontWeight: '700', fontSize: '1.125rem' }}>
                         {user?.full_name?.charAt(0) || '👥'}
@@ -863,26 +888,29 @@ const acceptGroup = async (requestId: string) => {
               Start a Group Call?
             </h2>
             <p style={{ color: '#78716c', marginBottom: '1.5rem', maxWidth: '32rem', margin: '0 auto' }}>
-              Invite others to join a supportive group conversation. Anyone can join while it&#39;s active.
-            </p>
+  Invite others to join a supportive group conversation. Anyone can join while it&#39;s active.
+</p>
             <button
-  onClick={() => setShowContextModal('group')}
-  disabled={isPostingGroup || !!activeOneOnOne || isRedirectingRef.current}
-  style={{
-    ...styles.button,
-    ...styles.groupButton,
-    ...(isPostingGroup || activeOneOnOne || isRedirectingRef.current ? styles.disabledButton : {}),
-    margin: '0 auto',
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-  }}
->
-  <Users size={20} /> Request Group Call
-</button>
+              onClick={() => setShowContextModal('group')}
+              disabled={isPostingGroup || !!activeOneOnOne || isRedirectingRef.current}
+              style={{
+                ...styles.button,
+                ...styles.groupButton,
+                ...(isPostingGroup || activeOneOnOne || isRedirectingRef.current ? styles.disabledButton : {}),
+                margin: '0 auto',
+                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+              }}
+            >
+              <Users size={20} /> Request Group Call
+            </button>
           </div>
         )}
 
         {/* Available Requests */}
-        <div style={{ ...styles.card, ...styles.sectionGap, padding: 0, overflow: 'hidden' }}>
+        <div
+          ref={availableRequestsSectionRef}
+          style={{ ...styles.card, ...styles.sectionGap, padding: 0, overflow: 'hidden' }}
+        >
           <div style={{ padding: '1.25rem', borderBottom: '1px solid #f4f4f5', background: '#fafafa' }}>
             <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1c1917' }}>Available Requests</h2>
             <p style={{ color: '#78716c', marginTop: '0.25rem' }}>
@@ -894,161 +922,171 @@ const acceptGroup = async (requestId: string) => {
           {allRequests.length > 0 ? (
             <div>
               {allRequests.map((request) => (
-  <div
-  key={request.id}
-  onClick={() => !isRedirectingRef.current && (request.type === 'group' ? acceptGroup(request.id) : acceptOneOnOne(request.id))}
-  style={{
-    padding: '1.5rem',
-    cursor: 'pointer',
-    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-    borderRadius: '1rem',
-    background: '#fff',
-    border: '1px solid #f4f4f5',
-    marginBottom: '0.75rem',
-  }}
-  onMouseEnter={(e) => {
-    e.currentTarget.style.transform = 'scale(1.01)';
-    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
-  }}
-  onMouseLeave={(e) => {
-    e.currentTarget.style.transform = 'scale(1)';
-    e.currentTarget.style.boxShadow = 'none';
-  }}
->
-  <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-    {/* Avatar */}
-    <div style={{
-      width: '3rem',
-      height: '3rem',
-      borderRadius: '9999px',
-      background: '#fef3c7',
-      border: '2px solid #fcd34d',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexShrink: 0,
-    }}>
-      {request.user?.avatar_url ? (
-  <Image
-    src={`/api/media/avatars/${request.user.avatar_url}`}
-    alt={request.user.full_name}
-    width={48}
-    height={48}
-    className="rounded-full"
-    onError={(e) => (e.currentTarget.style.display = 'none')}
-  />
-      ) : (
-        <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
-          {request.user?.full_name?.charAt(0) || '👤'}
-        </span>
-      )}
-    </div>
+                <div
+                  key={request.id}
+                  ref={(el) => {
+                    requestRefs.current[request.id] = el;
+                  }}
+                  onClick={() =>
+                    !isRedirectingRef.current &&
+                    (request.type === 'group' ? acceptGroup(request.id) : acceptOneOnOne(request.id))
+                  }
+                  style={{
+                    padding: '1.5rem',
+                    cursor: 'pointer',
+                    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                    borderRadius: '1rem',
+                    background: '#fff',
+                    border: '1px solid #f4f4f5',
+                    marginBottom: '0.75rem',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.01)';
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                    <div
+                      style={{
+                        width: '3rem',
+                        height: '3rem',
+                        borderRadius: '9999px',
+                        background: '#fef3c7',
+                        border: '2px solid #fcd34d',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {request.user?.avatar_url ? (
+                        <Image
+                          src={`/api/media/avatars/${request.user.avatar_url}`}
+                          alt={request.user.full_name}
+                          width={48}
+                          height={48}
+                          className="rounded-full"
+                          onError={(e) => (e.currentTarget.style.display = 'none')}
+                        />
+                      ) : (
+                        <span style={{ color: '#92400e', fontWeight: '700', fontSize: '1.125rem' }}>
+                          {request.user?.full_name?.charAt(0) || '👤'}
+                        </span>
+                      )}
+                    </div>
 
-    {/* Content */}
-    <div style={{ flex: 1 }}>
-      <h3 style={{
-        fontWeight: '700',
-        color: '#1c1917',
-        fontSize: '1.125rem',
-        marginBottom: '0.25rem',
-      }}>
-        {request.user?.full_name} {request.type === 'group' ? ' (Group)' : ''}
-      </h3>
+                    <div style={{ flex: 1 }}>
+                      <h3
+                        style={{
+                          fontWeight: '700',
+                          color: '#1c1917',
+                          fontSize: '1.125rem',
+                          marginBottom: '0.25rem',
+                        }}
+                      >
+                        {request.user?.full_name} {request.type === 'group' ? ' (Group)' : ''}
+                      </h3>
 
-      <p style={{
-        color: '#78716c',
-        fontSize: '0.875rem',
-        marginBottom: '0.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-      }}>
-        <span>{request.type === 'group' ? 'Group call open' : 'Looking to talk now'}</span>
-        <span>•</span>
-        <span>{timeAgo(request.created_at)}</span>
-      </p>
+                      <p
+                        style={{
+                          color: '#78716c',
+                          fontSize: '0.875rem',
+                          marginBottom: '0.5rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                        }}
+                      >
+                        <span>{request.type === 'group' ? 'Group call open' : 'Looking to talk now'}</span>
+                        <span>•</span>
+                        <span>{timeAgo(request.created_at)}</span>
+                      </p>
 
-      {/* Context */}
-      {request.context && (
-        <div style={{
-          background: '#f9fafb',
-          border: '1px solid #e5e5e5',
-          borderRadius: '0.5rem',
-          padding: '0.75rem 1rem',
-          fontSize: '0.875rem',
-          color: '#57534e',
-          fontStyle: 'italic',
-          lineHeight: 1.5,
-          marginBottom: '0.75rem',
-          maxWidth: '100%',
-          wordBreak: 'break-word',
-        }}>
-          “{request.context}”
-        </div>
-      )}
+                      {request.context && (
+                        <div
+                          style={{
+                            background: '#f9fafb',
+                            border: '1px solid #e5e5e5',
+                            borderRadius: '0.5rem',
+                            padding: '0.75rem 1rem',
+                            fontSize: '0.875rem',
+                            color: '#57534e',
+                            fontStyle: 'italic',
+                            lineHeight: 1.5,
+                            marginBottom: '0.75rem',
+                            maxWidth: '100%',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          “{request.context}”
+                        </div>
+                      )}
 
-      {/* Join Button */}
-      <button
-  onClick={(e) => {
-    e.stopPropagation();
-    if (!isRedirectingRef.current) {
-      if (request.type === 'group') {
-        acceptGroup(request.id);
-      } else {
-        acceptOneOnOne(request.id);
-      }
-    }
-  }}
-  disabled={acceptingRequestId === request.id} // 👈 disable while loading
-  style={{
-    background: acceptingRequestId === request.id
-      ? '#9ca3af' // grayed out
-      : request.type === 'group'
-        ? '#3b82f6'
-        : '#10b981',
-    color: 'white',
-    border: 'none',
-    borderRadius: '9999px',
-    padding: '0.5rem 1rem',
-    fontWeight: '600',
-    fontSize: '0.875rem',
-    cursor: acceptingRequestId === request.id ? 'not-allowed' : 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    transition: 'background 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-  }}
-  onMouseEnter={(e) => {
-    if (acceptingRequestId !== request.id) {
-      e.currentTarget.style.background = request.type === 'group' ? '#2563eb' : '#059669';
-    }
-  }}
-  onMouseLeave={(e) => {
-    if (acceptingRequestId !== request.id) {
-      e.currentTarget.style.background = request.type === 'group' ? '#3b82f6' : '#10b981';
-    }
-  }}
->
-  {acceptingRequestId === request.id ? (
-    <>
-      <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" opacity="0.25" />
-        <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor" />
-      </svg>
-      Connecting...
-    </>
-  ) : (
-    <>
-      <Phone size={16} />
-      Connect
-    </>
-  )}
-</button>
-    </div>
-  </div>
-</div>
-))}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!isRedirectingRef.current) {
+                            if (request.type === 'group') {
+                              acceptGroup(request.id);
+                            } else {
+                              acceptOneOnOne(request.id);
+                            }
+                          }
+                        }}
+                        disabled={acceptingRequestId === request.id}
+                        style={{
+                          background: acceptingRequestId === request.id
+                            ? '#9ca3af'
+                            : request.type === 'group'
+                            ? '#3b82f6'
+                            : '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '9999px',
+                          padding: '0.5rem 1rem',
+                          fontWeight: '600',
+                          fontSize: '0.875rem',
+                          cursor: acceptingRequestId === request.id ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          transition: 'background 0.2s',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (acceptingRequestId !== request.id) {
+                            e.currentTarget.style.background = request.type === 'group' ? '#2563eb' : '#059669';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (acceptingRequestId !== request.id) {
+                            e.currentTarget.style.background = request.type === 'group' ? '#3b82f6' : '#10b981';
+                          }
+                        }}
+                      >
+                        {acceptingRequestId === request.id ? (
+                          <>
+                            <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24">
+                              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" opacity="0.25" />
+                              <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor" />
+                            </svg>
+                            Connecting...
+                          </>
+                        ) : (
+                          <>
+                            <Phone size={16} />
+                            Connect
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div style={{ padding: '3rem', textAlign: 'center', color: '#a8a29e' }}>
@@ -1059,7 +1097,6 @@ const acceptGroup = async (requestId: string) => {
             </div>
           )}
         </div>
-
 
         {/* How It Works */}
         <div style={{ ...styles.card, ...styles.sectionGap }}>
@@ -1096,100 +1133,96 @@ const acceptGroup = async (requestId: string) => {
         </div>
 
         {/* Context Modal */}
-          {showContextModal && (
+        {showContextModal && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100vw',
+              height: '100vh',
+              background: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 100,
+            }}
+            onClick={() => setShowContextModal(null)}
+          >
             <div
               style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                width: '100vw',
-                height: '100vh',
-                background: 'rgba(0,0,0,0.5)',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                zIndex: 100,
+                background: '#fff',
+                borderRadius: '1rem',
+                padding: '1.5rem',
+                width: '90%',
+                maxWidth: '28rem',
+                boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                position: 'relative',
               }}
-              onClick={() => setShowContextModal(null)}
+              onClick={(e) => e.stopPropagation()}
             >
-              <div
+              <h3 style={{ fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>Why are you reaching out?</h3>
+              <p style={{ color: '#78716c', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                This helps others understand what to expect. (Optional, max 280 chars)
+              </p>
+              <textarea
+                autoFocus
+                value={tempContext}
+                onChange={(e) => setTempContext(e.target.value.slice(0, 280))}
+                placeholder="e.g., I lost my dog yesterday and feel overwhelmed..."
+                maxLength={280}
+                rows={3}
                 style={{
-                  background: '#fff',
-                  borderRadius: '1rem',
-                  padding: '1.5rem',
-                  width: '90%',
-                  maxWidth: '28rem',
-                  boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-                  position: 'relative',
+                  width: '100%',
+                  padding: '0.5rem',
+                  borderRadius: '0.5rem',
+                  border: '1px solid #e5e5e5',
+                  fontSize: '0.875rem',
+                  resize: 'none',
+                  marginBottom: '0.75rem',
                 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h3 style={{ fontWeight: '700', color: '#1c1917', marginBottom: '0.5rem' }}>
-                  Why are you reaching out?
-                </h3>
-                <p style={{ color: '#78716c', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                  This helps others understand what to expect. (Optional, max 280 chars)
-                </p>
-                <textarea
-                  autoFocus
-                  value={tempContext}
-                  onChange={(e) => setTempContext(e.target.value.slice(0, 280))}
-                  placeholder="e.g., I lost my dog yesterday and feel overwhelmed..."
-                  maxLength={280}
-                  rows={3}
+              />
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setShowContextModal(null)}
                   style={{
-                    width: '100%',
-                    padding: '0.5rem',
-                    borderRadius: '0.5rem',
-                    border: '1px solid #e5e5e5',
-                    fontSize: '0.875rem',
-                    resize: 'none',
-                    marginBottom: '0.75rem',
+                    padding: '0.5rem 1rem',
+                    background: '#f4f4f5',
+                    color: '#1c1917',
+                    border: 'none',
+                    borderRadius: '9999px',
+                    cursor: 'pointer',
                   }}
-                />
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={() => setShowContextModal(null)}
-                    style={{
-                      padding: '0.5rem 1rem',
-                      background: '#f4f4f5',
-                      color: '#1c1917',
-                      border: 'none',
-                      borderRadius: '9999px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-  onClick={() => {
-    if (showContextModal === 'one-on-one') {
-      postOneOnOneWithContext(tempContext);
-    } else if (showContextModal === 'group') {
-      postGroupWithContext(tempContext);
-    }
-    setTempContext('');
-    setShowContextModal(null);
-  }}
-  style={{
-    padding: '0.5rem 1rem',
-    background: showContextModal === 'group' ? '#3b82f6' : '#d97706',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '9999px',
-    cursor: 'pointer',
-    fontWeight: '600',
-  }}
->
-  Continue
-</button>
-                </div>
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (showContextModal === 'one-on-one') {
+                      postOneOnOneWithContext(tempContext);
+                    } else if (showContextModal === 'group') {
+                      postGroupWithContext(tempContext);
+                    }
+                    setTempContext('');
+                    setShowContextModal(null);
+                  }}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: showContextModal === 'group' ? '#3b82f6' : '#d97706',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '9999px',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Continue
+                </button>
               </div>
             </div>
-          )}
+          </div>
+        )}
       </div>
-
     </div>
-
   );
 }
